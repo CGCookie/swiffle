@@ -6,6 +6,21 @@ import os
 from . import global_vars
 
 
+def hex_to_rgb(value):
+    gamma = 2.2
+    value = value.lstrip('#')
+    lv = len(value)
+    fin = list(int(value[i:i + lv // 3], 16) for i in range(0, lv, lv // 3))
+    r = pow(fin[1] / 255, gamma)
+    g = pow(fin[2] / 255, gamma)
+    b = pow(fin[0] / 255, gamma)
+    fin.clear()
+    fin.append(r)
+    fin.append(g)
+    fin.append(b)
+    return tuple(fin)
+
+
 class EXAMPLE_OT_dummy_operator(bpy.types.Operator):
     bl_idname = "example.dummy_operator"
     bl_label = "Dummy Operator"
@@ -14,8 +29,25 @@ class EXAMPLE_OT_dummy_operator(bpy.types.Operator):
 
     def execute(self, context):
         from .lib.swf.movie import SWF
-        testfile = open(os.path.abspath(os.path.dirname(__file__) + "/test/rectangle.swf"), "rb")
-        print(SWF(testfile))
+        from .lib.swf.tag import TagSetBackgroundColor
+        from .lib.swf.utils import ColorUtils
+        testfile = open(os.path.abspath(os.path.dirname(__file__) + "/test/bumble-bee1.swf"), "rb")
+        testswf = SWF(testfile)
+        print(testswf)
+        # Divide by 20 because SWF units are in "twips", 1/20 of a pixel
+        width = (testswf.header.frame_size.xmax - testswf.header.frame_size.xmin) / 20
+        height = (testswf.header.frame_size.ymax - testswf.header.frame_size.ymin) / 20
+
+        # Background color (loops should result in just one tag)
+        bg_tag = [x for x in testswf.all_tags_of_type(TagSetBackgroundColor)]
+
+        bpy.context.scene.render.resolution_x = width
+        bpy.context.scene.render.resolution_y = height
+        bpy.context.scene.render.fps = testswf.header.frame_rate
+        bpy.context.scene.frame_end = testswf.header.frame_count
+        bpy.context.scene.world.color = hex_to_rgb(ColorUtils.to_rgb_string(bg_tag[0].color)) #XXX to_rgb_string seems to return brg instead of rgb
+
+        print(hex_to_rgb(ColorUtils.to_rgb_string(bg_tag[0].color)))
         return {"FINISHED"}
 
 
