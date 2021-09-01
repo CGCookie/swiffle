@@ -56,6 +56,18 @@ class EXAMPLE_OT_dummy_operator(bpy.types.Operator):
         bpy.data.worlds["World"].node_tree.nodes["Background"].inputs[0].default_value = hex_to_rgba(ColorUtils.to_rgb_string(bg_tag[0].color))
 
         print(len(testswf.tags))
+
+        # Here's a dumb idea... use pyswf's built-in convert to SVG function... then import that using Blender's SVG importer
+        from .lib.swf.export import SVGExporter
+        svg_exporter = SVGExporter()
+        testsvg = testswf.export(svg_exporter)
+        # Temp output
+        tmpout_path = "/tmp/swfimport.svg"
+
+        open(tmpout_path, "wb").write(testsvg.read())
+        #bpy.ops.wm.gpencil_import_svg(filepath=tmpout_path, scale=100, resolution=100) #XXX This seems so not be functional
+        bpy.ops.import_curve.svg(filepath=tmpout_path)
+
         return {"FINISHED"}
 
 
