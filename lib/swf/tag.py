@@ -162,7 +162,7 @@ class SWFTimelineContainer(DefinitionTag):
         while type(tag) != TagEnd:
             tag = self.parse_tag(data)
             if tag:
-                #print tag.name
+                #print(tag.name)
                 self.tags.append(tag)
 
     def parse_tag(self, data):
