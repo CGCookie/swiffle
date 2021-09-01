@@ -34,6 +34,7 @@ bl_info = {
 
 
 import bpy
+import subprocess
 
 
 # Local imports
