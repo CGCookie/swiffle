@@ -546,7 +546,7 @@ class SVGExporter(BaseExporter):
         return self._serialize()
 
     def _serialize(self):
-        return cStringIO(etree.tostring(self.svg,
+        return BytesIO(etree.tostring(self.svg,
                 encoding="UTF-8", xml_declaration=True))
 
     def export_define_sprite(self, tag, parent=None):
@@ -1127,4 +1127,3 @@ def _swf_matrix_to_svg_matrix(swf_matrix=None, need_scale=False, need_translate=
     values = _swf_matrix_to_matrix(swf_matrix, need_scale, need_translate, need_rotation, unit_div)
     str_values = ",".join(map(str, values))
     return "matrix(%s)" % str_values
-
