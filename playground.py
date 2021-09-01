@@ -21,6 +21,13 @@ def hex_to_rgb(value):
     return tuple(fin)
 
 
+def hex_to_rgba(value):
+    rgb = hex_to_rgb(value)
+    rgba = list(rgb)
+    rgba.append(1.0) # Just set alpha to 1
+    return tuple(rgba)
+
+
 class EXAMPLE_OT_dummy_operator(bpy.types.Operator):
     bl_idname = "example.dummy_operator"
     bl_label = "Dummy Operator"
@@ -46,8 +53,9 @@ class EXAMPLE_OT_dummy_operator(bpy.types.Operator):
         bpy.context.scene.render.fps = testswf.header.frame_rate
         bpy.context.scene.frame_end = testswf.header.frame_count
         bpy.context.scene.world.color = hex_to_rgb(ColorUtils.to_rgb_string(bg_tag[0].color)) #XXX to_rgb_string seems to return brg instead of rgb
+        bpy.data.worlds["World"].node_tree.nodes["Background"].inputs[0].default_value = hex_to_rgba(ColorUtils.to_rgb_string(bg_tag[0].color))
 
-        print(hex_to_rgb(ColorUtils.to_rgb_string(bg_tag[0].color)))
+        print(len(testswf.tags))
         return {"FINISHED"}
 
 
