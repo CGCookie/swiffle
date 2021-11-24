@@ -41,11 +41,11 @@ import subprocess
 from . import global_vars
 global_vars.initialize()
 from .install_dependencies import dependencies, install_pip, install_and_import_module, import_module
-from .playground import EXAMPLE_PT_warning_panel, EXAMPLE_OT_dummy_operator, EXAMPLE_PT_panel
+from .playground import SWF_PT_warning_panel, SWF_OT_test_operator, SWF_PT_panel
 
 
-classes = (EXAMPLE_OT_dummy_operator,
-           EXAMPLE_PT_panel)
+classes = (SWF_OT_test_operator,
+           SWF_PT_panel)
 
 
 class SWF_OT_install_dependencies(bpy.types.Operator):
@@ -89,7 +89,7 @@ class preferences(bpy.types.AddonPreferences):
         layout.operator(SWF_OT_install_dependencies.bl_idname, icon="CONSOLE")
 
 
-preference_classes = (EXAMPLE_PT_warning_panel,
+preference_classes = (SWF_PT_warning_panel,
                       SWF_OT_install_dependencies,
                       preferences)
 

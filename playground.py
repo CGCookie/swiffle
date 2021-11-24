@@ -28,10 +28,10 @@ def hex_to_rgba(value):
     return tuple(rgba)
 
 
-class EXAMPLE_OT_dummy_operator(bpy.types.Operator):
-    bl_idname = "example.dummy_operator"
-    bl_label = "Dummy Operator"
-    bl_description = "This operator tries to use pyswf."
+class SWF_OT_test_operator(bpy.types.Operator):
+    bl_idname = "swf.test_operator"
+    bl_label = "Test SWF Import"
+    bl_description = "This operator tries to use pyswf to import."
     bl_options = {"REGISTER"}
 
     def execute(self, context):
@@ -71,20 +71,20 @@ class EXAMPLE_OT_dummy_operator(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class EXAMPLE_PT_panel(bpy.types.Panel):
-    bl_label = "Example Panel"
-    bl_category = "Example Tab"
+class SWF_PT_panel(bpy.types.Panel):
+    bl_label = "SWF Import Panel"
+    bl_category = "SWF Import"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
 
     def draw(self, context):
         layout = self.layout
-        layout.operator(EXAMPLE_OT_dummy_operator.bl_idname)
+        layout.operator(SWF_OT_test_operator.bl_idname)
 
 
-class EXAMPLE_PT_warning_panel(bpy.types.Panel):
-    bl_label = "Example Warning"
-    bl_category = "Example Tab"
+class SWF_PT_warning_panel(bpy.types.Panel):
+    bl_label = "Warning"
+    bl_category = "SWF Import"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
 
