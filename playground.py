@@ -21,6 +21,27 @@ class SWF_OT_test_operator(bpy.types.Operator):
 
         build_world(testswf)
 
+        # Parsing should basically look like this:
+        #  * Iterate through all tags in order.
+        #    * For every ShowFrame tag (type TagShowFrame, or 1), increment the current frame after processing.
+        #    * All tags preceding the ShowFrame tag are potential candidates for being displayed on that previous frame.
+        #    * Look for Define[Shape4,Sprite,etc] tags to dictate the actual objects added to the scene
+        #      * DefineShape is another loop
+        #        * In the the DefineShape4 is a property called shapes that has all the shapes
+        #        * There are subproperties, _initialFillStyles and _initialLineStyles that have stoke and fill definitions
+        #        * The shapes themselves seem to live in the records subproperty
+        #        * There's a readstyle_array_length subfunction... not sure what it does.
+        #    * The PlaceObject and PlaceObject2 tags (types 4 and 26, respectively) tell how and where assets are moved, based on their characterId (defined in the Define[blah] tag)
+
+        bpy.context.scene.frame_current = 1
+
+        for tag in testswf.tags:
+            if "DefineShape" in tag.name: # We have a new object to add!
+                #XXX For now, assumes DefineShape4
+
+            if tag.name == "ShowFrame":
+                bpy.context.scene.frame_current += 1
+
         '''
         # Here's a dumb idea... use pyswf's built-in convert to SVG function... then import that using Blender's SVG importer
         from .lib.swf.export import SVGExporter
