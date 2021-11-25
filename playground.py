@@ -66,7 +66,7 @@ class SWF_OT_test_operator(bpy.types.Operator):
 
         open(tmpout_path, "wb").write(testsvg.read())
         #bpy.ops.wm.gpencil_import_svg(filepath=tmpout_path, scale=100, resolution=100) #XXX This seems so not be functional
-        bpy.ops.import_curve.svg(filepath=tmpout_path)
+        bpy.ops.import_curve.svg(filepath=tmpout_path) # Then convert to Grease Pencil. Not ideal, but it kind of works
 
         return {"FINISHED"}
 
