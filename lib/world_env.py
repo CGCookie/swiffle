@@ -38,8 +38,13 @@ def build_world(swfdata):
     bg_tag = [x for x in swfdata.all_tags_of_type(TagSetBackgroundColor)]
 
     #XXX Assume an orthographic camera because taking perspective into account when converting pixels to real units is hard
-    bpy.context.scene.camera.data.type = "ORTHO"
-    bpy.context.scene.camera.data.ortho_scale = max([width, height]) / PIXELS_PER_METER
+    camera = bpy.context.scene.camera
+    camera.data.type = "ORTHO"
+    camera.data.ortho_scale = max([width, height]) / PIXELS_PER_METER
+    camera.data.shift_x = 0.5
+    camera.data.shift_y = -(min([width, height]) * 0.5) / max([width, height])
+    camera.location = [0, 0, 10]
+    camera.rotation_euler = [0, 0, 0]
 
     bpy.context.scene.render.resolution_x = width
     bpy.context.scene.render.resolution_y = height

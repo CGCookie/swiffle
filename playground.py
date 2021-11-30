@@ -18,7 +18,7 @@ class SWF_OT_test_operator(bpy.types.Operator):
 
     def execute(self, context):
         from .lib.swf.movie import SWF
-        testfile = open(os.path.abspath(os.path.dirname(__file__) + "/test/bumble-bee1.swf"), "rb")
+        testfile = open(os.path.abspath(os.path.dirname(__file__) + "/test/star.swf"), "rb")
         testswf = SWF(testfile)
         #print(testswf)
 
@@ -40,6 +40,7 @@ class SWF_OT_test_operator(bpy.types.Operator):
         bpy.context.scene.frame_current = 1
 
         for tag in testswf.tags:
+            frame_height = bpy.context.scene.render.resolution_y
             if tag.name.startswith("DefineShape"): # We have a new object to add!
                 # Make a new Grease Pencil object to hold our shapes
                 gp_data = bpy.data.grease_pencils.new(tag.name + ".{0:03}".format(tag.characterId))
@@ -82,19 +83,38 @@ class SWF_OT_test_operator(bpy.types.Operator):
                         if shape.state_moveto:
                             move_x = shape.move_deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER
                             move_y = shape.move_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER
-                            draw_pos = [move_x, move_y]
+                            draw_pos = [move_x, -move_y]
+                            print("Draw Position:", draw_pos)
+                            bpy.context.scene.cursor.location = [draw_pos[0], draw_pos[1], 0]
                         #XXX Still need to handle fill and line style selection
+                    elif shape.type == 3: # StraightEdgeRecord
+                        gp_stroke = gp_frame.strokes.new()
+                        gp_stroke.line_width = 20 #XXX placeholder
+                        gp_stroke.display_mode = "3DSPACE"
+                        gp_stroke.material_index = 0 #XXX placeholder
+                        start = draw_pos
+                        end = [draw_pos[0] + (shape.deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER),
+                               draw_pos[1] - (shape.deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
+                        gp_points = [start, end]
+                        draw_pos = end
+                        print(gp_points)
+                        for point in gp_points:
+                            gp_stroke.points.add(1)
+                            gp_stroke.points[-1].co.x = point[0]
+                            gp_stroke.points[-1].co.y = point[1]
                     elif shape.type == 4: # CurvedEdgeRecord
                         gp_stroke = gp_frame.strokes.new()
-                        gp_stroke.line_width = 300 #XXX placeholder
+                        gp_stroke.line_width = 20 #XXX placeholder
                         gp_stroke.display_mode = "3DSPACE"
                         gp_stroke.material_index = 0 #XXX placeholder
                         anchor1 = draw_pos
                         control = [draw_pos[0] + (shape.control_deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER),
-                                   draw_pos[1] + (shape.control_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
+                                   draw_pos[1] - (shape.control_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
                         anchor2 = [control[0] + (shape.anchor_deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER),
-                                   control[1] + (shape.anchor_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
+                                   control[1] - (shape.anchor_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
                         gp_points = [anchor1, control, anchor1]
+                        draw_pos = anchor2
+                        print(gp_points)
                         for point in gp_points:
                             gp_stroke.points.add(1)
                             gp_stroke.points[-1].co.x = point[0]
@@ -110,13 +130,12 @@ class SWF_OT_test_operator(bpy.types.Operator):
                             bpy.context.collection.objects.link(ob)
                             if tag.hasMatrix:
                                 #XXX Blender doesn't support shearing at the object level, so the rotateSkew0 and rotateSkew1 values can only be used for rotation
-                                #XXX Also, Blender's 2D Animation workspace defaults to the camera looking down the Y axis... so xy in SWF is xz in Blender
                                 translate_x = tag.matrix.translateX / PIXELS_PER_TWIP / PIXELS_PER_METER
-                                translate_z = tag.matrix.translateY / PIXELS_PER_TWIP / PIXELS_PER_METER
-                                rotation_y = sin(tag.matrix.rotateSkew0)
-                                ob.location = (ob.location[0] + translate_x, ob.location[1], ob.location[2] + translate_z)
-                                ob.rotation_euler[1] += rotation_y
-                                ob.scale = (tag.matrix.scaleX, ob.scale[1], tag.matrix.scaleY)
+                                translate_y = -tag.matrix.translateY / PIXELS_PER_TWIP / PIXELS_PER_METER
+                                rotation_z = sin(tag.matrix.rotateSkew0)
+                                ob.location = (ob.location[0] + translate_x, ob.location[1] + translate_y, ob.location[2])
+                                ob.rotation_euler[1] += rotation_z
+                                ob.scale = (tag.matrix.scaleX, tag.matrix.scaleY, ob.scale[2])
 
                             ob["swf_depth"] = tag.depth
                             ob_is_found = True
