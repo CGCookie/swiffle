@@ -105,7 +105,7 @@ class SWF_OT_test_operator(bpy.types.Operator):
                         if not shape.state_new_styles: # Use existing fill and line styles
                             if shape.state_fill_style0: #XXX We're disregarding fill style 1
                                 fill_style = fill_styles[shape.fill_style0 - 1]
-                                gp_mat.grease_pencil.fill_color = hex_to_rgba(ColorUtils.to_rgb_string(fill_style.rgb))
+                                gp_mat.grease_pencil.fill_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.rgb)))
                                 if fill_style.type == 0:
                                     gp_mat.grease_pencil.fill_style = "SOLID" #XXX Still need to support other fill types
                                 gp_mat.grease_pencil.show_fill = True
@@ -113,7 +113,7 @@ class SWF_OT_test_operator(bpy.types.Operator):
                                 gp_mat.grease_pencil.show_fill = False
                             if shape.state_line_style:
                                 line_style = line_styles[shape.line_style - 1]
-                                gp_mat.grease_pencil.color  = hex_to_rgba(ColorUtils.to_rgb_string(line_style.color))
+                                gp_mat.grease_pencil.color  = hex_to_rgba(hex(ColorUtils.rgb(line_style.color)))
                                 gp_mat["swf_linewidth"] = line_style.width
                                 gp_mat["swf_line_miter"] = 3.0
                                 gp_mat["swf_no_close"] = line_style.no_close
@@ -124,7 +124,7 @@ class SWF_OT_test_operator(bpy.types.Operator):
                         # Start creating a stroke, but don't commit it yet
                         gp_stroke = gp_frame.strokes.new()
                         if "swf_linewidth" in gp_mat.keys():
-                            gp_stroke.line_width = gp_mat["swf_linewidth"]
+                            gp_stroke.line_width = (gp_mat["swf_linewidth"] / PIXELS_PER_TWIP) * 10 #XXX Hardcoded multiplier...not sure it's right yet
                         else:
                             gp_stroke.line_width = 0
                         if "swf_no_close" in gp_mat.keys():
