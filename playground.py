@@ -32,8 +32,8 @@ class SWF_OT_test_operator(bpy.types.Operator):
         #      * DefineShape is another loop
         #        * In the the DefineShape4 is a property called shapes that has all the shapes
         #        * There are subproperties, _initialFillStyles and _initialLineStyles that have stoke and fill definitions
-        #        * The shapes themselves seem to live in the records subproperty
-        #        * There's a readstyle_array_length subfunction... not sure what it does.
+        #        * The shapes themselves seem to live in the records subproperty... treat them as a stream
+        #          * Loop through shape records. Each StyleChangeRecord constitutes a new, disconnected GP stroke
         #    * The PlaceObject and PlaceObject2 tags (types 4 and 26, respectively) tell how and where assets are moved, based on their characterId (defined in the Define[blah] tag)
 
         orig_frame = bpy.context.scene.frame_current
@@ -47,41 +47,11 @@ class SWF_OT_test_operator(bpy.types.Operator):
                 gp_object["swf_characterId"] = tag.characterId
                 fill_styles = tag.shapes._initialFillStyles
                 line_styles = tag.shapes._initialLineStyles
-                '''
-                # Define initial material
-                gp_mat = bpy.data.materials.new("SWF Material")
-                bpy.data.materials.create_gpencil_data(gp)
-                for fill_style in tag.shapes._initialFillStyles:
-                    gp_mat = bpy.data.materials.new("FillStyle")
-                    bpy.data.materials.create_gpencil_data(gp_mat)
-                    gp_mat.grease_pencil.show_stroke = False
-                    gp_mat.grease_pencil.show_fill = True
-                    gp_mat.grease_pencil.fill_color = hex_to_rgba(ColorUtils.to_rgb_string(fill_style.rgb))
-                    if fill_style.type == 0:
-                        gp_mat.grease_pencil.fill_style = "SOLID"
-                    else:
-                        raise Exception("Non-solid fill types are currently not supported")
-                    gp_data.materials.append(gp_mat)
-                for line_style in tag.shapes._initialLineStyles:
-                    gp_mat = bpy.data.materials.new("LineStyle")
-                    bpy.data.materials.create_gpencil_data(gp_mat)
-                    gp_mat.grease_pencil.show_stroke = True
-                    if line_style.fill_type == None:
-                        gp_mat.grease_pencil.show_fill = False
-                    else:
-                        raise Exception("Filled line styles not currently supported")
-                    gp_mat.grease_pencil.color  = hex_to_rgba(ColorUtils.to_rgb_string(line_style.color))
-                    gp_mat["swf_linewidth"] = line_style.width
-                    gp_mat["swf_line_miter"] = 3.0
-                    gp_data.materials.append(gp_mat)
-                '''
 
                 # We need some basic layer stuff in our Grease Pencil object for drawing
                 gp_layer = gp_data.layers.new("Layer", set_active = True)
                 gp_frame = gp_layer.frames.new(bpy.context.scene.frame_current) #XXX This is only the first frame... not all of them
                 # Start creating shapes
-                # Process looks like this:
-                #   Loop through shape records. Each StyleChangeRecord constitutes a new, disconnected GP stroke
                 draw_pos = [0.0, 0.0] #XXX Should start as the object/shape origin
                 gp_points = []
                 for shape in tag.shapes.records:
@@ -138,7 +108,6 @@ class SWF_OT_test_operator(bpy.types.Operator):
                             move_x = shape.move_deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER
                             move_y = shape.move_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER
                             draw_pos = [move_x, -move_y]
-                            print("Draw Position:", draw_pos)
                         gp_points.append(draw_pos)
                     elif shape.type == 3: # StraightEdgeRecord
                         #start = draw_pos
@@ -192,19 +161,6 @@ class SWF_OT_test_operator(bpy.types.Operator):
 
         bpy.context.scene.frame_end = bpy.context.scene.frame_current - 1
         bpy.context.scene.frame_current = orig_frame
-
-        '''
-        # Here's a dumb idea... use pyswf's built-in convert to SVG function... then import that using Blender's SVG importer
-        from .lib.swf.export import SVGExporter
-        svg_exporter = SVGExporter()
-        testsvg = testswf.export(svg_exporter)
-        # Temp output
-        tmpout_path = "/tmp/swfimport.svg"
-
-        open(tmpout_path, "wb").write(testsvg.read())
-        #bpy.ops.wm.gpencil_import_svg(filepath=tmpout_path, scale=100, resolution=100) #XXX This seems so not be functional
-        bpy.ops.import_curve.svg(filepath=tmpout_path) # Then convert to Grease Pencil. Not ideal, but it kind of works
-        '''
 
         return {"FINISHED"}
 
