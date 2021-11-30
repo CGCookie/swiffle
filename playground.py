@@ -40,13 +40,17 @@ class SWF_OT_test_operator(bpy.types.Operator):
         bpy.context.scene.frame_current = 1
 
         for tag in testswf.tags:
-            frame_height = bpy.context.scene.render.resolution_y
             if tag.name.startswith("DefineShape"): # We have a new object to add!
                 # Make a new Grease Pencil object to hold our shapes
                 gp_data = bpy.data.grease_pencils.new(tag.name + ".{0:03}".format(tag.characterId))
                 gp_object = bpy.data.objects.new(tag.name + ".{0:03}".format(tag.characterId), gp_data)
                 gp_object["swf_characterId"] = tag.characterId
-                # Define initial fill and line materials
+                fill_styles = tag.shapes._initialFillStyles
+                line_styles = tag.shapes._initialLineStyles
+                '''
+                # Define initial material
+                gp_mat = bpy.data.materials.new("SWF Material")
+                bpy.data.materials.create_gpencil_data(gp)
                 for fill_style in tag.shapes._initialFillStyles:
                     gp_mat = bpy.data.materials.new("FillStyle")
                     bpy.data.materials.create_gpencil_data(gp_mat)
@@ -70,55 +74,89 @@ class SWF_OT_test_operator(bpy.types.Operator):
                     gp_mat["swf_linewidth"] = line_style.width
                     gp_mat["swf_line_miter"] = 3.0
                     gp_data.materials.append(gp_mat)
+                '''
 
                 # We need some basic layer stuff in our Grease Pencil object for drawing
                 gp_layer = gp_data.layers.new("Layer", set_active = True)
                 gp_frame = gp_layer.frames.new(bpy.context.scene.frame_current) #XXX This is only the first frame... not all of them
                 # Start creating shapes
+                # Process looks like this:
+                #   Loop through shape records. Each StyleChangeRecord constitutes a new, disconnected GP stroke
                 draw_pos = [0.0, 0.0] #XXX Should start as the object/shape origin
+                gp_points = []
                 for shape in tag.shapes.records:
                     if shape.type == 1: # EndShapeRecord... this should be the last shape record
+                        # Add the points for the last shape
+                        for point in gp_points:
+                            gp_stroke.points.add(1)
+                            gp_stroke.points[-1].co.x = point[0]
+                            gp_stroke.points[-1].co.y = point[1]
                         break
                     elif shape.type == 2: # StyleChangeRecord
+                        # If this isn't the first StyleChangeRecord, draw the points in the preceding stroke
+                        for point in gp_points:
+                            gp_stroke.points.add(1)
+                            gp_stroke.points[-1].co.x = point[0]
+                            gp_stroke.points[-1].co.y = point[1]
+                        # Create material based on fill style and line style
+                        #XXX In an ideal world, we'll check to see if this material combination already exists
+                        gp_mat = bpy.data.materials.new("SWF Material")
+                        bpy.data.materials.create_gpencil_data(gp_mat)
+                        if not shape.state_new_styles: # Use existing fill and line styles
+                            if shape.state_fill_style0: #XXX We're disregarding fill style 1
+                                fill_style = fill_styles[shape.fill_style0 - 1]
+                                gp_mat.grease_pencil.fill_color = hex_to_rgba(ColorUtils.to_rgb_string(fill_style.rgb))
+                                if fill_style.type == 0:
+                                    gp_mat.grease_pencil.fill_style = "SOLID" #XXX Still need to support other fill types
+                                gp_mat.grease_pencil.show_fill = True
+                            else:
+                                gp_mat.grease_pencil.show_fill = False
+                            if shape.state_line_style:
+                                line_style = line_styles[shape.line_style - 1]
+                                gp_mat.grease_pencil.color  = hex_to_rgba(ColorUtils.to_rgb_string(line_style.color))
+                                gp_mat["swf_linewidth"] = line_style.width
+                                gp_mat["swf_line_miter"] = 3.0
+                                gp_mat["swf_no_close"] = line_style.no_close
+                                gp_mat.grease_pencil.show_stroke = True
+                            else:
+                                gp_mat.grease_pencil.show_stroke = False
+                        gp_data.materials.append(gp_mat)
+                        # Start creating a stroke, but don't commit it yet
+                        gp_stroke = gp_frame.strokes.new()
+                        if "swf_linewidth" in gp_mat.keys():
+                            gp_stroke.line_width = gp_mat["swf_linewidth"]
+                        else:
+                            gp_stroke.line_width = 0
+                        if "swf_no_close" in gp_mat.keys():
+                            gp_stroke.use_cyclic = not gp_mat["swf_no_close"]
+                        else:
+                            gp_stroke.use_cyclic = False
+                        gp_stroke.display_mode = "3DSPACE"
+                        gp_stroke.material_index = len(gp_data.materials) - 1 #XXX This would need to be smarter if we're checking for already created materials
+                        gp_points = []
                         if shape.state_moveto:
                             move_x = shape.move_deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER
                             move_y = shape.move_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER
                             draw_pos = [move_x, -move_y]
                             print("Draw Position:", draw_pos)
-                            bpy.context.scene.cursor.location = [draw_pos[0], draw_pos[1], 0]
-                        #XXX Still need to handle fill and line style selection
+                        gp_points.append(draw_pos)
                     elif shape.type == 3: # StraightEdgeRecord
-                        gp_stroke = gp_frame.strokes.new()
-                        gp_stroke.line_width = 20 #XXX placeholder
-                        gp_stroke.display_mode = "3DSPACE"
-                        gp_stroke.material_index = 0 #XXX placeholder
-                        start = draw_pos
+                        #start = draw_pos
+                        #gp_points.append(start)
                         end = [draw_pos[0] + (shape.deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER),
                                draw_pos[1] - (shape.deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
-                        gp_points = [start, end]
+                        gp_points.append(end)
                         draw_pos = end
-                        print(gp_points)
-                        for point in gp_points:
-                            gp_stroke.points.add(1)
-                            gp_stroke.points[-1].co.x = point[0]
-                            gp_stroke.points[-1].co.y = point[1]
                     elif shape.type == 4: # CurvedEdgeRecord
-                        gp_stroke = gp_frame.strokes.new()
-                        gp_stroke.line_width = 20 #XXX placeholder
-                        gp_stroke.display_mode = "3DSPACE"
-                        gp_stroke.material_index = 0 #XXX placeholder
-                        anchor1 = draw_pos
+                        #anchor1 = draw_pos
                         control = [draw_pos[0] + (shape.control_deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER),
                                    draw_pos[1] - (shape.control_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
                         anchor2 = [control[0] + (shape.anchor_deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER),
                                    control[1] - (shape.anchor_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
-                        gp_points = [anchor1, control, anchor1]
+                        gp_points.append(anchor1)
+                        gp_points.append(control)
+                        gp_points.append(anchor2)
                         draw_pos = anchor2
-                        print(gp_points)
-                        for point in gp_points:
-                            gp_stroke.points.add(1)
-                            gp_stroke.points[-1].co.x = point[0]
-                            gp_stroke.points[-1].co.y = point[1]
 
             if tag.name.startswith("PlaceObject"):
                 if tag.hasCharacter and not tag.hasMove:
