@@ -140,14 +140,21 @@ class SWF_OT_test_operator(bpy.types.Operator):
                         gp_points.append(end)
                         draw_pos = end
                     elif shape.type == 4: # CurvedEdgeRecord
-                        #anchor1 = draw_pos
+                        anchor1 = draw_pos
                         control = [draw_pos[0] + (shape.control_deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER),
                                    draw_pos[1] - (shape.control_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
                         anchor2 = [control[0] + (shape.anchor_deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER),
                                    control[1] - (shape.anchor_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
+                        import mathutils
+                        knot1 = mathutils.Vector(anchor1)
+                        handle1 = mathutils.Vector(control)
+                        handle2 = mathutils.Vector(control)
+                        knot2 = mathutils.Vector(anchor2)
+                        _points = mathutils.geometry.interpolate_bezier(knot1, handle1, handle2, knot2, 12)
                         #gp_points.append(anchor1)
-                        gp_points.append(control)
-                        gp_points.append(anchor2)
+                        #gp_points.append(control)
+                        #gp_points.append(anchor2)
+                        gp_points.extend(_points)
                         draw_pos = anchor2
 
             if tag.name.startswith("PlaceObject"):
