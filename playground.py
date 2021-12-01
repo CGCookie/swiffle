@@ -1,7 +1,7 @@
 import bpy
 import os
 import mathutils
-from math import sin
+from math import sin, isclose
 
 
 # Local imports
@@ -10,6 +10,11 @@ from .lib.globals import *
 from .lib.world_env import build_world, hex_to_rgba
 from .lib.swf.utils import ColorUtils
 
+def close_points(p1, p2):
+    if isclose(p1[0], p2[0], rel_tol=1e-5) and isclose(p1[1], p2[1], rel_tol=1e-5):
+        return True
+    else:
+        return False
 
 class SWF_OT_test_operator(bpy.types.Operator):
     bl_idname = "swf.test_operator"
@@ -59,7 +64,14 @@ class SWF_OT_test_operator(bpy.types.Operator):
                 for shape in tag.shapes.records:
                     if shape.type == 1: # EndShapeRecord... this should be the last shape record
                         # Add the points for the last shape
-                        for point in gp_points:
+                        if close_points(gp_points[0], gp_points[-1]):
+                            gp_stroke.use_cyclic = True #XXX Ignoring the no_close line style attribute for the time being
+                            gp_points.pop()
+                        else:
+                            gp_stroke.use_cyclic = False
+                        for i, point in enumerate(gp_points):
+                            if close_points(point, gp_points[i - 1]): #XXX Hacky clean-up to remove duplicate points
+                                continue
                             gp_stroke.points.add(1)
                             gp_stroke.points[-1].co.x = point[0]
                             gp_stroke.points[-1].co.y = point[1]
@@ -68,7 +80,14 @@ class SWF_OT_test_operator(bpy.types.Operator):
                         # If this isn't the first StyleChangeRecord, draw the points in the preceding stroke
                         if len(gp_points) > 1:
                             #print("Shape Count:", shapecount)
-                            for point in gp_points:
+                            if close_points(gp_points[0], gp_points[-1]):
+                                gp_stroke.use_cyclic = True #XXX Ignoring the no_close line style attribute for the time being
+                                gp_points.pop()
+                            else:
+                                gp_stroke.use_cyclic = False
+                            for i, point in enumerate(gp_points):
+                                if close_points(point, gp_points[i - 1]): #XXX Hacky clean-up to remove duplicate points
+                                    continue
                                 gp_stroke.points.add(1)
                                 gp_stroke.points[-1].co.x = point[0]
                                 gp_stroke.points[-1].co.y = point[1]
@@ -91,7 +110,8 @@ class SWF_OT_test_operator(bpy.types.Operator):
                                     fill_style = fill_styles[shape.fill_style0 - 1]
                                 elif shape.state_fill_style1:
                                     fill_style = fill_styles[shape.fill_style1 - 1]
-                                    gp_mat.grease_pencil.use_fill_holdout = True #XXX Seems to work most of the time...
+                                    if len(gp_data.materials) > 0: #XXX Hack that prevents the first stroke from using a holdout material
+                                        gp_mat.grease_pencil.use_fill_holdout = True #XXX Seems to work most of the time...
                                 gp_mat.grease_pencil.fill_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.rgb)))
                                 if fill_style.type == 0:
                                     gp_mat.grease_pencil.fill_style = "SOLID" #XXX Still need to support other fill types
@@ -114,10 +134,6 @@ class SWF_OT_test_operator(bpy.types.Operator):
                             gp_stroke.line_width = (gp_mat["swf_linewidth"] / PIXELS_PER_TWIP) * 10 #XXX Hardcoded multiplier...not sure it's right yet
                         else:
                             gp_stroke.line_width = 0
-                        if "swf_no_close" in gp_mat.keys():
-                            gp_stroke.use_cyclic = not gp_mat["swf_no_close"]
-                        else:
-                            gp_stroke.use_cyclic = False
                         gp_stroke.display_mode = "3DSPACE"
                         gp_stroke.material_index = len(gp_data.materials) - 1 #XXX This would need to be smarter if we're checking for already created materials
                         gp_points = []
@@ -146,7 +162,7 @@ class SWF_OT_test_operator(bpy.types.Operator):
                                    control[1] - (shape.anchor_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
                         knot1 = mathutils.Vector(anchor1)
                         knot2 = mathutils.Vector(anchor2)
-                        handle1 = knot1.lerp(mathutils.Vector(control), 2/3)
+                        handle1 = knot1.lerp(mathutils.Vector(control), 2/3) # See SWF spec on converting from quadratic to cubic bezier curves
                         handle2 = knot2.lerp(mathutils.Vector(control), 2/3)
                         _points = mathutils.geometry.interpolate_bezier(knot1, handle1, handle2, knot2, 6) #XXX Hardcoded resolution value of 6
                         gp_points.extend(_points)
