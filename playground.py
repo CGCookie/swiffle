@@ -1,5 +1,6 @@
 import bpy
 import os
+import mathutils
 from math import sin
 
 
@@ -54,7 +55,7 @@ class SWF_OT_test_operator(bpy.types.Operator):
                 # Start creating shapes
                 draw_pos = [0.0, 0.0] #XXX Should start as the object/shape origin
                 gp_points = []
-                shapecount = 0
+                #shapecount = 0
                 for shape in tag.shapes.records:
                     if shape.type == 1: # EndShapeRecord... this should be the last shape record
                         # Add the points for the last shape
@@ -66,14 +67,14 @@ class SWF_OT_test_operator(bpy.types.Operator):
                     elif shape.type == 2: # StyleChangeRecord
                         # If this isn't the first StyleChangeRecord, draw the points in the preceding stroke
                         if len(gp_points) > 1:
-                            print("Shape Count:", shapecount)
+                            #print("Shape Count:", shapecount)
                             for point in gp_points:
                                 gp_stroke.points.add(1)
                                 gp_stroke.points[-1].co.x = point[0]
                                 gp_stroke.points[-1].co.y = point[1]
                             #if shapecount == 7:
                             #    break
-                            shapecount += 1
+                            #shapecount += 1
                         # Check for new fill styles and line styles
                         if shape.state_new_styles:
                             if len(shape.fill_styles) > 0:
@@ -126,8 +127,6 @@ class SWF_OT_test_operator(bpy.types.Operator):
                             draw_pos = [move_x, -move_y]
                         gp_points.append(draw_pos)
                     elif shape.type == 3: # StraightEdgeRecord
-                        #start = draw_pos
-                        #gp_points.append(start)
                         if shape.general_line_flag:
                             end = [draw_pos[0] + (shape.deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER),
                                    draw_pos[1] - (shape.deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
@@ -145,15 +144,11 @@ class SWF_OT_test_operator(bpy.types.Operator):
                                    draw_pos[1] - (shape.control_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
                         anchor2 = [control[0] + (shape.anchor_deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER),
                                    control[1] - (shape.anchor_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
-                        import mathutils
                         knot1 = mathutils.Vector(anchor1)
-                        handle1 = mathutils.Vector(control)
-                        handle2 = mathutils.Vector(control)
                         knot2 = mathutils.Vector(anchor2)
-                        _points = mathutils.geometry.interpolate_bezier(knot1, handle1, handle2, knot2, 12)
-                        #gp_points.append(anchor1)
-                        #gp_points.append(control)
-                        #gp_points.append(anchor2)
+                        handle1 = knot1.lerp(mathutils.Vector(control), 2/3)
+                        handle2 = knot2.lerp(mathutils.Vector(control), 2/3)
+                        _points = mathutils.geometry.interpolate_bezier(knot1, handle1, handle2, knot2, 6) #XXX Hardcoded resolution value of 6
                         gp_points.extend(_points)
                         draw_pos = anchor2
 
