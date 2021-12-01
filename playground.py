@@ -18,7 +18,7 @@ class SWF_OT_test_operator(bpy.types.Operator):
 
     def execute(self, context):
         from .lib.swf.movie import SWF
-        testfile = open(os.path.abspath(os.path.dirname(__file__) + "/test/star.swf"), "rb")
+        testfile = open(os.path.abspath(os.path.dirname(__file__) + "/test/bumble-bee1.swf"), "rb")
         testswf = SWF(testfile)
         #print(testswf)
 
@@ -54,6 +54,7 @@ class SWF_OT_test_operator(bpy.types.Operator):
                 # Start creating shapes
                 draw_pos = [0.0, 0.0] #XXX Should start as the object/shape origin
                 gp_points = []
+                shapecount = 0
                 for shape in tag.shapes.records:
                     if shape.type == 1: # EndShapeRecord... this should be the last shape record
                         # Add the points for the last shape
@@ -64,17 +65,32 @@ class SWF_OT_test_operator(bpy.types.Operator):
                         break
                     elif shape.type == 2: # StyleChangeRecord
                         # If this isn't the first StyleChangeRecord, draw the points in the preceding stroke
-                        for point in gp_points:
-                            gp_stroke.points.add(1)
-                            gp_stroke.points[-1].co.x = point[0]
-                            gp_stroke.points[-1].co.y = point[1]
+                        if len(gp_points) > 1:
+                            print("Shape Count:", shapecount)
+                            for point in gp_points:
+                                gp_stroke.points.add(1)
+                                gp_stroke.points[-1].co.x = point[0]
+                                gp_stroke.points[-1].co.y = point[1]
+                            #if shapecount == 7:
+                            #    break
+                            shapecount += 1
+                        # Check for new fill styles and line styles
+                        if shape.state_new_styles:
+                            if len(shape.fill_styles) > 0:
+                                fill_styles = shape.fill_styles
+                            if len(shape.line_styles) > 0:
+                                line_styles = shape.line_styles
                         # Create material based on fill style and line style
                         #XXX In an ideal world, we'll check to see if this material combination already exists
-                        gp_mat = bpy.data.materials.new("SWF Material")
-                        bpy.data.materials.create_gpencil_data(gp_mat)
-                        if not shape.state_new_styles: # Use existing fill and line styles
-                            if shape.state_fill_style0: #XXX We're disregarding fill style 1
-                                fill_style = fill_styles[shape.fill_style0 - 1]
+                        if shape.state_fill_style0 or shape.state_fill_style1 or shape.state_line_style:
+                            gp_mat = bpy.data.materials.new("SWF Material")
+                            bpy.data.materials.create_gpencil_data(gp_mat)
+                            if shape.state_fill_style0 or shape.state_fill_style1: #XXX For now assume XOR
+                                if shape.state_fill_style0:
+                                    fill_style = fill_styles[shape.fill_style0 - 1]
+                                elif shape.state_fill_style1:
+                                    fill_style = fill_styles[shape.fill_style1 - 1]
+                                    gp_mat.grease_pencil.use_fill_holdout = True #XXX Seems to work most of the time...
                                 gp_mat.grease_pencil.fill_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.rgb)))
                                 if fill_style.type == 0:
                                     gp_mat.grease_pencil.fill_style = "SOLID" #XXX Still need to support other fill types
@@ -112,8 +128,15 @@ class SWF_OT_test_operator(bpy.types.Operator):
                     elif shape.type == 3: # StraightEdgeRecord
                         #start = draw_pos
                         #gp_points.append(start)
-                        end = [draw_pos[0] + (shape.deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER),
-                               draw_pos[1] - (shape.deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
+                        if shape.general_line_flag:
+                            end = [draw_pos[0] + (shape.deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER),
+                                   draw_pos[1] - (shape.deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
+                        elif shape.vert_line_flag:
+                            end = [draw_pos[0],
+                                   draw_pos[1] - (shape.deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
+                        else:
+                            end = [draw_pos[0] + (shape.deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER),
+                                   draw_pos[1]]
                         gp_points.append(end)
                         draw_pos = end
                     elif shape.type == 4: # CurvedEdgeRecord
@@ -122,7 +145,7 @@ class SWF_OT_test_operator(bpy.types.Operator):
                                    draw_pos[1] - (shape.control_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
                         anchor2 = [control[0] + (shape.anchor_deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER),
                                    control[1] - (shape.anchor_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
-                        gp_points.append(anchor1)
+                        #gp_points.append(anchor1)
                         gp_points.append(control)
                         gp_points.append(anchor2)
                         draw_pos = anchor2
