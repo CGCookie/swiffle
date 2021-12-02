@@ -22,7 +22,7 @@ bl_info = {
     "name": "Adobe SWF format",
     "author": "Jason van Gumster (Fweeb)",
     "version": (0, 1),
-    "blender": (2, 92, 0),
+    "blender": (2, 93, 0),
     "location": "File > Import-Export",
     "description": "Import-Export SWF to and from Grease Pencil objects",
     "warning": "This add-on requires installing dependencies",
@@ -41,11 +41,10 @@ import subprocess
 from . import global_vars
 global_vars.initialize()
 from .install_dependencies import dependencies, install_pip, install_and_import_module, import_module
-from .playground import SWF_PT_warning_panel, SWF_OT_test_operator, SWF_PT_panel
+from .playground import SWF_OT_import
 
 
-classes = (SWF_OT_test_operator,
-           SWF_PT_panel)
+classes = (SWF_OT_import,)
 
 
 class SWF_OT_install_dependencies(bpy.types.Operator):
@@ -86,12 +85,24 @@ class preferences(bpy.types.AddonPreferences):
 
     def draw(self, context):
         layout = self.layout
+
+        lines = [f"This add-on requires a couple Python packages to be installed:",
+                 f"  - lxml",
+                 f"  - pylzma",
+                 f"Click the Install Dependencies button below to install them."]
+
+        for line in lines:
+            layout.label(text=line)
+
         layout.operator(SWF_OT_install_dependencies.bl_idname, icon="CONSOLE")
 
 
-preference_classes = (SWF_PT_warning_panel,
-                      SWF_OT_install_dependencies,
+preference_classes = (SWF_OT_install_dependencies,
                       preferences)
+
+
+def add_to_import_menu(self, context):
+    self.layout.operator(SWF_OT_import.bl_idname, text = "Flash/Animate (.swf)")
 
 
 def register():
@@ -110,6 +121,8 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
 
+    bpy.types.TOPBAR_MT_file_import.append(add_to_import_menu)
+
 
 def unregister():
     for cls in preference_classes:
@@ -118,6 +131,8 @@ def unregister():
     if global_vars.dependencies_installed:
         for cls in classes:
             bpy.utils.unregister_class(cls)
+
+    bpy.types.TOPBAR_MT_file_import.remove(add_to_import_menu)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,8 @@
 import bpy
 import os
 import mathutils
+from bpy_extras.io_utils import ImportHelper
+from bpy.props import StringProperty, BoolProperty
 from math import isclose
 
 
@@ -8,7 +10,9 @@ from math import isclose
 from . import global_vars
 from .lib.globals import *
 from .lib.world_env import build_world, hex_to_rgba
+from .lib.swf.movie import SWF
 from .lib.swf.utils import ColorUtils
+
 
 def close_points(p1, p2):
     if isclose(p1[0], p2[0], rel_tol=1e-5) and isclose(p1[1], p2[1], rel_tol=1e-5):
@@ -16,11 +20,35 @@ def close_points(p1, p2):
     else:
         return False
 
-class SWF_OT_test_operator(bpy.types.Operator):
-    bl_idname = "swf.test_operator"
-    bl_label = "Test SWF Import"
-    bl_description = "This operator tries to use pyswf to import."
+
+def load_swf(context, filepath):
+    f = open(filepath, "rb")
+    swf = SWF(f)
+    #print(swf)
+    f.close()
+    return swf
+
+
+class SWF_OT_import(bpy.types.Operator, ImportHelper):
+    """Import SWF file as Grease Pencil animation"""
+    bl_idname = "swf.import_swf"
+    bl_label = "SWF Import"
+    bl_description = "Import SWF file as Grease Pencil animation."
     bl_options = {"REGISTER"}
+
+    filename_ext = ".swf"
+
+    filter_glob: StringProperty(
+        default = "*.swf",
+        options = {"HIDDEN"},
+        maxlen = 255,
+    )
+
+    import_world: BoolProperty(
+        name = "Import World",
+        description = "Include world, camera, and framerate settings from SWF",
+        default = True,
+    )
 
     def key_transforms(self, object, matrix):
         #XXX Blender doesn't support shearing at the object level, so the rotateSkew0 and rotateSkew1 values can only be used for rotation
@@ -228,13 +256,12 @@ class SWF_OT_test_operator(bpy.types.Operator):
                     bpy.context.scene.frame_current += 1
 
     def execute(self, context):
-        from .lib.swf.movie import SWF
-        testfile = open(os.path.abspath(os.path.dirname(__file__) + "/test/wheel.swf"), "rb")
-        testswf = SWF(testfile)
-        #print(testswf)
+        swf = load_swf(context, self.filepath)
 
-        build_world(testswf)
-        self.parse_tags(testswf.tags)
+        if self.import_world:
+            build_world(swf)
+
+        self.parse_tags(swf.tags)
 
         # Hacky clean-up because I think SWF assumes all animations are loops
         for action in bpy.data.actions:
@@ -244,45 +271,3 @@ class SWF_OT_test_operator(bpy.types.Operator):
                 modifier.mode_after = "REPEAT"
 
         return {"FINISHED"}
-
-
-class SWF_PT_panel(bpy.types.Panel):
-    bl_label = "SWF Import Panel"
-    bl_category = "SWF Import"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.operator(SWF_OT_test_operator.bl_idname)
-
-
-class SWF_PT_warning_panel(bpy.types.Panel):
-    bl_label = "Warning"
-    bl_category = "SWF Import"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-
-    @classmethod
-    def poll(self, context):
-        return not global_vars.dependencies_installed
-
-    def draw(self, context):
-        layout = self.layout
-
-        lines = [f"Please install the missing dependencies for the add-on.",
-                 f"1. Open the preferences (Edit > Preferences > Add-ons).",
-                 f"2. Search for the add-on.",
-                 f"3. Open the details section of the add-on.",
-                 f"4. Click on the Install Dependencies button.",
-                 f"   This will download and install the missing Python packages, if Blender has the required",
-                 f"   permissions.",
-                 f"If you're attempting to run the add-on from the text editor, you won't see the options described",
-                 f"above. Please install the add-on properly through the preferences.",
-                 f"1. Open the add-on preferences (Edit > Preferences > Add-ons).",
-                 f"2. Press the \"Install\" button.",
-                 f"3. Search for the add-on file.",
-                 f"4. Confirm the selection by pressing the \"Install Add-on\" button in the file browser."]
-
-        for line in lines:
-            layout.label(text=line)
