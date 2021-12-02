@@ -41,7 +41,7 @@ import subprocess
 from . import global_vars
 global_vars.initialize()
 from .install_dependencies import dependencies, install_pip, install_and_import_module, import_module
-from .playground import SWF_OT_import
+from .import_swf import SWF_OT_import
 
 
 classes = (SWF_OT_import,)
