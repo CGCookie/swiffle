@@ -1,7 +1,7 @@
 import bpy
 import os
 import mathutils
-from math import sin, isclose
+from math import isclose
 
 
 # Local imports
@@ -24,16 +24,14 @@ class SWF_OT_test_operator(bpy.types.Operator):
 
     def key_transforms(self, object, matrix):
         #XXX Blender doesn't support shearing at the object level, so the rotateSkew0 and rotateSkew1 values can only be used for rotation
-        translate_x = matrix.translateX / PIXELS_PER_TWIP / PIXELS_PER_METER
-        translate_y = -matrix.translateY / PIXELS_PER_TWIP / PIXELS_PER_METER
-        rotation_z = sin(matrix.rotateSkew0)
-        object.location = (object.location[0] + translate_x, object.location[1] + translate_y, object.location[2])
-        object.rotation_euler[2] += rotation_z
-        object.scale = (matrix.scaleX, matrix.scaleY, object.scale[2])
+        m = mathutils.Matrix([[matrix.scaleX, matrix.rotateSkew0, 0.0, matrix.translateX / PIXELS_PER_TWIP / PIXELS_PER_METER],
+                              [matrix.rotateSkew1, matrix.scaleY, 0.0, -matrix.translateY / PIXELS_PER_TWIP / PIXELS_PER_METER],
+                              [0.0, 0.0, 0.0, 0.0],
+                              [0.0, 0.0, 0.0, 0.0]])
+        object.matrix_world = m
         object.keyframe_insert("location")
         object.keyframe_insert("rotation_euler")
         object.keyframe_insert("scale")
-        print("Frame added at frame {0} for object {1}".format(bpy.context.scene.frame_current, object.name))
 
     def parse_tags(self, tags, is_sprite = False):
             # Parsing should basically look like this:
@@ -50,7 +48,6 @@ class SWF_OT_test_operator(bpy.types.Operator):
             #    * If you run into a DefineSprite tag, the whole process above gets nested. Current plan is to make a collection and place it as a collection instance
 
             orig_frame = bpy.context.scene.frame_current
-            print("Setting current frame to 1")
             bpy.context.scene.frame_current = 1
 
             # Make container collection for this set of tags
@@ -59,7 +56,6 @@ class SWF_OT_test_operator(bpy.types.Operator):
 
             for tag in tags:
                 if tag.name == "End":
-                    print("Reseting frame to {0}".format(orig_frame))
                     bpy.context.scene.frame_current = orig_frame
                     return tag_collection
 
@@ -239,6 +235,13 @@ class SWF_OT_test_operator(bpy.types.Operator):
 
         build_world(testswf)
         self.parse_tags(testswf.tags)
+
+        # Hacky clean-up because I think SWF assumes all animations are loops
+        for action in bpy.data.actions:
+            for fcurve in action.fcurves:
+                modifier = fcurve.modifiers.new(type="CYCLES")
+                modifier.mode_before = "REPEAT"
+                modifier.mode_after = "REPEAT"
 
         return {"FINISHED"}
 
