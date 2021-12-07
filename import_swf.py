@@ -54,8 +54,8 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         #XXX Blender doesn't support shearing at the object level, so the rotateSkew0 and rotateSkew1 values can only be used for rotation
         m = mathutils.Matrix([[matrix.scaleX, matrix.rotateSkew0, 0.0, matrix.translateX / PIXELS_PER_TWIP / PIXELS_PER_METER],
                               [matrix.rotateSkew1, matrix.scaleY, 0.0, -matrix.translateY / PIXELS_PER_TWIP / PIXELS_PER_METER],
-                              [0.0, 0.0, 0.0, 0.0],
-                              [0.0, 0.0, 0.0, 0.0]])
+                              [0.0, 0.0, 1.0, 0.0],
+                              [0.0, 0.0, 0.0, 1.0]])
         object.matrix_world = m
         object.keyframe_insert("location")
         object.keyframe_insert("rotation_euler")
