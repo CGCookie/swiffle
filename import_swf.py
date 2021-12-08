@@ -50,6 +50,12 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         default = True,
     )
 
+    clear_scene: BoolProperty(
+        name = "Clear Scene",
+        description = "Remove any already existing objects from the scene",
+        default = True, # True for debugging; False in production
+    )
+
     swf_data = {}
 
     def key_transforms(self, object, matrix):
@@ -263,6 +269,19 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
 
     def execute(self, context):
         swf = load_swf(context, self.filepath)
+
+        if self.clear_scene:
+            for ob in bpy.data.objects:
+                bpy.data.objects.remove(ob, do_unlink = True)
+            camera_data = bpy.data.cameras.new("Camera")
+            camera_ob = bpy.data.objects.new("Camera", camera_data)
+            if bpy.data.collections.find("Camera") == -1:
+                camera_collection = bpy.data.collections.new("Camera")
+                bpy.context.scene.collection.link(camera_collection)
+            else:
+                camera_collection = bpy.data.collections[bpy.data.collections.find("Camera")]
+            camera_collection.objects.link(camera_ob)
+            bpy.context.scene.camera = camera_ob
 
         if self.import_world:
             build_world(swf)
