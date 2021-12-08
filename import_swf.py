@@ -50,6 +50,8 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         default = True,
     )
 
+    swf_data = {}
+
     def key_transforms(self, object, matrix):
         #XXX Blender doesn't support shearing at the object level, so the rotateSkew0 and rotateSkew1 values can only be used for rotation
         m = mathutils.Matrix([[matrix.scaleX, matrix.rotateSkew0, 0.0, matrix.translateX / PIXELS_PER_TWIP / PIXELS_PER_METER],
@@ -78,21 +80,21 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
             orig_frame = bpy.context.scene.frame_current
             bpy.context.scene.frame_current = 1
 
-            # Make container collection for this set of tags
-            tag_collection = bpy.data.collections.new("SWF Tags")
+            if is_sprite:
+                # Make container collection for this set of tags
+                tag_collection = bpy.data.collections.new("SWF Sprite Tags")
             last_character = None
 
             for tag in tags:
                 if tag.name == "End":
                     bpy.context.scene.frame_current = orig_frame
-                    return tag_collection
+                    if is_sprite:
+                        return tag_collection
 
                 if tag.name.startswith("DefineShape"): # We have a new object to add!
                     # Make a new Grease Pencil object to hold our shapes
                     gp_data = bpy.data.grease_pencils.new(tag.name + ".{0:03}".format(tag.characterId))
-                    gp_object = bpy.data.objects.new(tag.name + ".{0:03}".format(tag.characterId), gp_data)
-                    tag_collection.objects.link(gp_object)
-                    gp_object["swf_characterId"] = tag.characterId
+                    gp_data["swf_characterId"] = tag.characterId
                     fill_styles = tag.shapes._initialFillStyles
                     line_styles = tag.shapes._initialLineStyles
 
@@ -117,6 +119,8 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                                 gp_stroke.points.add(1)
                                 gp_stroke.points[-1].co.x = point[0]
                                 gp_stroke.points[-1].co.y = point[1]
+                            # Populate the swf_data dict with our newly imported stuff
+                            self.swf_data[tag.characterId] = {"data": gp_data, "type": "shape"}
                             break
                         elif shape.type == 2: # StyleChangeRecord
                             # If this isn't the first StyleChangeRecord, draw the points in the preceding stroke
@@ -133,7 +137,8 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                                     gp_stroke.points.add(1)
                                     gp_stroke.points[-1].co.x = point[0]
                                     gp_stroke.points[-1].co.y = point[1]
-                                #if shapecount == 7:
+                                #if shapecount == 10:
+                                #    print(shape.record_id)
                                 #    break
                                 #shapecount += 1
                             # Check for new fill styles and line styles
@@ -169,7 +174,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                                     gp_mat.grease_pencil.show_stroke = True
                                 else:
                                     gp_mat.grease_pencil.show_stroke = False
-                            gp_data.materials.append(gp_mat)
+                                gp_data.materials.append(gp_mat)
                             # Start creating a stroke, but don't commit it yet
                             gp_stroke = gp_frame.strokes.new()
                             if "swf_linewidth" in gp_mat.keys():
@@ -216,28 +221,29 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                     sprite_instance["swf_characterId"] = tag.characterId
                     sprite_instance.instance_type = "COLLECTION"
                     sprite_instance.instance_collection = sprite_collection
+                    # Populate the swf_data dict with our newly imported stuff
+                    self.swf_data[tag.characterId] = {"data": sprite_instance, "type": "sprite"}
 
                 if tag.name.startswith("PlaceObject"):
                     if tag.hasCharacter and not tag.hasMove:
                         # Add a new character (that we've already defined with ID of characterId)
-                        # Find the object we already created with the identified character ID
-                        ob_is_found = False
-                        for ob in bpy.data.objects:
-                            if "swf_characterId" in ob.keys() and ob["swf_characterId"] == tag.characterId:
-                                if not is_sprite:
-                                    bpy.context.collection.objects.link(ob)
-                                else:
-                                    tag_collection.objects.link(ob)
-                                if tag.hasMatrix:
-                                    self.key_transforms(ob, tag.matrix)
-                                ob["swf_depth"] = tag.depth
-                                if hasattr(tag, "instanceName") and tag.instanceName is not None:
-                                    ob.name = tag.instanceName
-                                last_character = ob
-                                ob_is_found = True
-                                break
-                        if not ob_is_found:
-                            raise Exception("Trying to place an object/characterId that hasn't been defined.")
+                        character = self.swf_data[tag.characterId]
+                        if character["type"] == "shape":
+                            object = bpy.data.objects.new(tag.name + ".{0:03}".format(tag.characterId), character["data"])
+                        elif character["type"] == "sprite":
+                            object = character["data"]
+
+                        if not is_sprite:
+                            bpy.context.collection.objects.link(object)
+                        else:
+                            tag_collection.objects.link(object)
+
+                        if tag.hasMatrix:
+                            self.key_transforms(object, tag.matrix)
+                        object["swf_depth"] = tag.depth
+                        if hasattr(tag, "instanceName") and tag.instanceName is not None:
+                            object.name = tag.instanceName
+                        last_character = object
 
                     elif not tag.hasCharacter and tag.hasMove:
                         # Character at given depth (only one character is allowed at a given depth) has been modified
