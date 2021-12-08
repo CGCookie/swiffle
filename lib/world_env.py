@@ -8,8 +8,9 @@ from .swf.utils import ColorUtils
 
 
 def hex_to_rgb(value):
-    if value == "0x0":
-        value = "0x000000"
+    # Quick fix since we don't always get consistently-lengthed hex strings
+    if len(value) < 8:
+        value = "0x" + value[2:].rjust(6, "0")
     gamma = 2.2
     value = value[2:]
     lv = len(value)
