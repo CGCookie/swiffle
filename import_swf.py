@@ -3,13 +3,18 @@ import os
 import mathutils
 from bpy_extras.io_utils import ImportHelper
 from bpy.props import StringProperty, BoolProperty
-from math import isclose
+from math import isclose, radians
+import numpy as np
+try:
+    import Image
+except ImportError:
+    from PIL import Image
 
 
 # Local imports
 from . import global_vars
 from .lib.globals import *
-from .lib.world_env import build_world, hex_to_rgba
+from .lib.world_env import build_world, rgb_gamma, hex_to_rgba
 from .lib.swf.movie import SWF
 from .lib.swf.utils import ColorUtils
 
@@ -28,6 +33,19 @@ def load_swf(context, filepath):
     f.close()
     return swf
 
+
+def pil_to_image(pil_image, name = "New Image"):
+    """
+    Borrowing from StackExchange (https://blender.stackexchange.com/questions/173206/how-to-efficiently-convert-a-pil-image-to-bpy-types-image)
+    PIL image pixels is 2D array of byte tuple (when mode is 'RGB', 'RGBA') or byte (when mode is 'L')
+    bpy image pixels is flat array of normalized values in RGBA order
+    """
+    width = pil_image.width
+    height = pil_image.height
+    byte_to_normalized = 1.0 / 255.0
+    bpy_image = bpy.data.images.new(name, width = width, height = height)
+    bpy_image.pixels[:] = (np.asarray(pil_image.convert("RGBA"),dtype=np.float32) * byte_to_normalized).ravel()
+    return bpy_image
 
 class SWF_OT_import(bpy.types.Operator, ImportHelper):
     """Import SWF file as Grease Pencil animation"""
@@ -125,6 +143,10 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                                 gp_stroke.points.add(1)
                                 gp_stroke.points[-1].co.x = point[0]
                                 gp_stroke.points[-1].co.y = point[1]
+                            # Reset fill transforms
+                            gp_stroke.uv_rotation = 0.0
+                            gp_stroke.uv_scale = 1.0
+                            gp_stroke.uv_translation = [0.0, 0.0]
                             # Populate the swf_data dict with our newly imported stuff
                             self.swf_data[tag.characterId] = {"data": gp_data, "type": "shape"}
                             break
@@ -143,6 +165,10 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                                     gp_stroke.points.add(1)
                                     gp_stroke.points[-1].co.x = point[0]
                                     gp_stroke.points[-1].co.y = point[1]
+                                # Reset fill transforms
+                                gp_stroke.uv_rotation = 0.0
+                                gp_stroke.uv_scale = 1.0
+                                gp_stroke.uv_translation = [0.0, 0.0]
                                 #if shapecount == 10:
                                 #    print(shape.record_id)
                                 #    break
@@ -164,31 +190,47 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                                     elif shape.state_fill_style1:
                                         fill_style = fill_styles[shape.fill_style1 - 1]
                                         #if len(gp_data.materials) > 0: #XXX Hack that prevents the first stroke from using a holdout material
-                                        #    gp_mat.grease_pencil.use_fill_holdout = True #XXX Seems to work most of the time...
                                     #XXX Still need to support other fill types
                                     if fill_style.type == 0: # Solid fill
                                         gp_mat.grease_pencil.fill_style = "SOLID"
                                         gp_mat.grease_pencil.fill_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.rgb)))
-                                    elif fill_style.type == 16 or fill_style.type == 18: # Linear or Radial gradient
+                                    elif fill_style.type in [16, 18]: # Linear or Radial gradient
                                         #XXX Only support for two-color gradients in GP fill style gradients; only using first and last gradient record
                                         gp_mat.grease_pencil.fill_style = "GRADIENT"
-                                        if fill_style == 16:
+                                        if fill_style.type == 16:
                                             gp_mat.grease_pencil.gradient_type = "LINEAR"
-                                        elif fill_style == 18:
+                                        elif fill_style.type == 18:
                                             gp_mat.grease_pencil.gradient_type = "RADIAL"
                                         gp_mat.grease_pencil.fill_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.gradient.records[0].color)))
                                         gp_mat.grease_pencil.mix_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.gradient.records[-1].color)))
                                         #XXX The following doesn't seem to position the gradient correctly
                                         grad_matrix = fill_style.gradient_matrix
+                                        gp_mat.grease_pencil.mix_factor = 0.0
                                         gp_matrix = mathutils.Matrix([[grad_matrix.scaleX, grad_matrix.rotateSkew0, 0.0, grad_matrix.translateX / PIXELS_PER_TWIP / PIXELS_PER_METER],
-                                                                      [grad_matrix.rotateSkew1, grad_matrix.scaleY, 0.0, -grad_matrix.translateY / PIXELS_PER_TWIP / PIXELS_PER_METER],
+                                                                      [grad_matrix.rotateSkew1, grad_matrix.scaleY, 0.0, grad_matrix.translateY / PIXELS_PER_TWIP / PIXELS_PER_METER],
+                                                                      [0.0, 0.0, 1.0, 0.0],
+                                                                      [0.0, 0.0, 0.0, 1.0]])
+                                        gp_mat.grease_pencil.texture_offset[0] = gp_matrix.decompose()[0][0] + 0.8 #XXX Nonsensical hardcoded correction value
+                                        gp_mat.grease_pencil.texture_offset[1] = gp_matrix.decompose()[0][1] + 0.8 #XXX Nonsensical hardcoded correction value
+                                        gp_mat.grease_pencil.texture_angle = gp_matrix.decompose()[1].to_euler()[2] + radians(135.0) #XXX SWF assumes a diagonal gradient to start?
+                                        gp_mat.grease_pencil.texture_scale[0] = gp_matrix.decompose()[2][0] + 0.3 #XXX Nonsensical hardcoded correction value
+                                        gp_mat.grease_pencil.texture_scale[1] = gp_matrix.decompose()[2][1] + 0.3 #XXX Nonsensical hardcoded correction value
+                                    elif fill_style.type in [64, 65, 66, 67]: # Bitmap fill
+                                        gp_mat.grease_pencil.fill_style = "TEXTURE"
+                                        image = self.swf_data[fill_style.bitmap_id]["data"]
+                                        gp_mat.grease_pencil.fill_image = image
+                                        gp_mat.grease_pencil.mix_factor = 0.0
+                                        #XXX The following doesn't seem to position the image correctly
+                                        img_matrix = fill_style.bitmap_matrix
+                                        gp_matrix = mathutils.Matrix([[img_matrix.scaleX, img_matrix.rotateSkew0, 0.0, img_matrix.translateX / PIXELS_PER_TWIP / PIXELS_PER_METER],
+                                                                      [img_matrix.rotateSkew1, img_matrix.scaleY, 0.0, img_matrix.translateY / PIXELS_PER_TWIP / PIXELS_PER_METER],
                                                                       [0.0, 0.0, 1.0, 0.0],
                                                                       [0.0, 0.0, 0.0, 1.0]])
                                         gp_mat.grease_pencil.texture_offset[0] = gp_matrix.decompose()[0][0]
                                         gp_mat.grease_pencil.texture_offset[1] = gp_matrix.decompose()[0][1]
                                         gp_mat.grease_pencil.texture_angle = gp_matrix.decompose()[1].to_euler()[2]
-                                        gp_mat.grease_pencil.texture_scale[0] = gp_matrix.decompose()[2][0]
-                                        gp_mat.grease_pencil.texture_scale[1] = gp_matrix.decompose()[2][1]
+                                        gp_mat.grease_pencil.texture_scale[0] = gp_matrix.decompose()[2][0] / 5
+                                        gp_mat.grease_pencil.texture_scale[1] = gp_matrix.decompose()[2][1] / 5
 
                                     gp_mat.grease_pencil.show_fill = True
                                 else:
@@ -253,6 +295,12 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                     # Populate the swf_data dict with our newly imported stuff
                     self.swf_data[tag.characterId] = {"data": sprite_instance, "type": "sprite"}
 
+                if tag.name == "DefineBitsJPEG2":
+                    image = Image.open(tag.bitmapData)
+                    img_datablock = pil_to_image(image, name = tag.name)
+                    img_datablock["swf_characterId"] = tag.characterId
+                    self.swf_data[tag.characterId] = {"data": img_datablock, "type": "image"}
+
                 if tag.name.startswith("PlaceObject"):
                     if tag.hasCharacter and not tag.hasMove:
                         # Add a new character (that we've already defined with ID of characterId)
@@ -286,6 +334,15 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                     #if tag.hasCharacter and tag.hasMove:
                         # Character at given depth is removed. New character (already defined with ID of characterId) is added at given depth
                         #break
+
+                    if tag.hasColorTransform:
+                        #XXX Perhaps not the best approach, the HSV modifier doesn't work on GP image textures
+                        add_color = rgb_gamma([tag.colorTransform.rAdd, tag.colorTransform.gAdd, tag.colorTransform.bAdd], 2.2)
+                        mix_factor = 1.0 - (tag.colorTransform.rMult / 255) #XXX Assumes uniform mixing for R, G, and B
+                        last_character.data.layers[0].tint_color = add_color #XXX Assumes only one GP layer
+                        last_character.data.layers[0].tint_factor = 1.0
+                        for slot in last_character.material_slots:
+                            slot.material.grease_pencil.mix_factor = mix_factor
 
                 if tag.name == "ShowFrame":
                     bpy.context.scene.frame_current += 1
