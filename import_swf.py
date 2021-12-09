@@ -163,15 +163,37 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                                         fill_style = fill_styles[shape.fill_style0 - 1]
                                     elif shape.state_fill_style1:
                                         fill_style = fill_styles[shape.fill_style1 - 1]
-                                        if len(gp_data.materials) > 0: #XXX Hack that prevents the first stroke from using a holdout material
-                                            gp_mat.grease_pencil.use_fill_holdout = True #XXX Seems to work most of the time...
-                                    gp_mat.grease_pencil.fill_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.rgb)))
-                                    if fill_style.type == 0:
-                                        gp_mat.grease_pencil.fill_style = "SOLID" #XXX Still need to support other fill types
+                                        #if len(gp_data.materials) > 0: #XXX Hack that prevents the first stroke from using a holdout material
+                                        #    gp_mat.grease_pencil.use_fill_holdout = True #XXX Seems to work most of the time...
+                                    #XXX Still need to support other fill types
+                                    if fill_style.type == 0: # Solid fill
+                                        gp_mat.grease_pencil.fill_style = "SOLID"
+                                        gp_mat.grease_pencil.fill_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.rgb)))
+                                    elif fill_style.type == 16 or fill_style.type == 18: # Linear or Radial gradient
+                                        #XXX Only support for two-color gradients in GP fill style gradients; only using first and last gradient record
+                                        gp_mat.grease_pencil.fill_style = "GRADIENT"
+                                        if fill_style == 16:
+                                            gp_mat.grease_pencil.gradient_type = "LINEAR"
+                                        elif fill_style == 18:
+                                            gp_mat.grease_pencil.gradient_type = "RADIAL"
+                                        gp_mat.grease_pencil.fill_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.gradient.records[0].color)))
+                                        gp_mat.grease_pencil.mix_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.gradient.records[-1].color)))
+                                        #XXX The following doesn't seem to position the gradient correctly
+                                        grad_matrix = fill_style.gradient_matrix
+                                        gp_matrix = mathutils.Matrix([[grad_matrix.scaleX, grad_matrix.rotateSkew0, 0.0, grad_matrix.translateX / PIXELS_PER_TWIP / PIXELS_PER_METER],
+                                                                      [grad_matrix.rotateSkew1, grad_matrix.scaleY, 0.0, -grad_matrix.translateY / PIXELS_PER_TWIP / PIXELS_PER_METER],
+                                                                      [0.0, 0.0, 1.0, 0.0],
+                                                                      [0.0, 0.0, 0.0, 1.0]])
+                                        gp_mat.grease_pencil.texture_offset[0] = gp_matrix.decompose()[0][0]
+                                        gp_mat.grease_pencil.texture_offset[1] = gp_matrix.decompose()[0][1]
+                                        gp_mat.grease_pencil.texture_angle = gp_matrix.decompose()[1].to_euler()[2]
+                                        gp_mat.grease_pencil.texture_scale[0] = gp_matrix.decompose()[2][0]
+                                        gp_mat.grease_pencil.texture_scale[1] = gp_matrix.decompose()[2][1]
+
                                     gp_mat.grease_pencil.show_fill = True
                                 else:
                                     gp_mat.grease_pencil.show_fill = False
-                                if shape.state_line_style:
+                                if shape.state_line_style and shape.line_style > 0:
                                     line_style = line_styles[shape.line_style - 1]
                                     gp_mat.grease_pencil.color  = hex_to_rgba(hex(ColorUtils.rgb(line_style.color)))
                                     gp_mat["swf_linewidth"] = line_style.width
@@ -213,11 +235,12 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                                        draw_pos[1] - (shape.control_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
                             anchor2 = [control[0] + (shape.anchor_deltaX / PIXELS_PER_TWIP / PIXELS_PER_METER),
                                        control[1] - (shape.anchor_deltaY / PIXELS_PER_TWIP / PIXELS_PER_METER)]
+
                             knot1 = mathutils.Vector(anchor1)
                             knot2 = mathutils.Vector(anchor2)
                             handle1 = knot1.lerp(mathutils.Vector(control), 2/3) # See SWF spec on converting from quadratic to cubic bezier curves
                             handle2 = knot2.lerp(mathutils.Vector(control), 2/3)
-                            _points = mathutils.geometry.interpolate_bezier(knot1, handle1, handle2, knot2, 6) #XXX Hardcoded resolution value of 6
+                            _points = mathutils.geometry.interpolate_bezier(knot1, handle1, handle2, knot2, 12) #XXX Hardcoded resolution value of 12
                             gp_points.extend(_points)
                             draw_pos = anchor2
 
