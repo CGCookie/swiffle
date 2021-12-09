@@ -7,6 +7,17 @@ from .swf.tag import TagSetBackgroundColor
 from .swf.utils import ColorUtils
 
 
+def rgb_gamma(rgb, gamma):
+    r = pow(rgb[0] / 255, gamma)
+    g = pow(rgb[1] / 255, gamma)
+    b = pow(rgb[2] / 255, gamma)
+    rgb.clear()
+    rgb.append(r)
+    rgb.append(g)
+    rgb.append(b)
+    return tuple(rgb)
+
+
 def hex_to_rgb(value):
     # Quick fix since we don't always get consistently-lengthed hex strings
     if len(value) < 8:
@@ -15,14 +26,7 @@ def hex_to_rgb(value):
     value = value[2:]
     lv = len(value)
     fin = list(int(value[i:i + lv // 3], 16) for i in range(0, lv, lv // 3))
-    r = pow(fin[0] / 255, gamma)
-    g = pow(fin[1] / 255, gamma)
-    b = pow(fin[2] / 255, gamma)
-    fin.clear()
-    fin.append(r)
-    fin.append(g)
-    fin.append(b)
-    return tuple(fin)
+    return rgb_gamma(fin, gamma)
 
 
 def hex_to_rgba(value):
