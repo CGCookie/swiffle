@@ -87,6 +87,83 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         object.keyframe_insert("rotation_euler")
         object.keyframe_insert("scale")
 
+    def finish_stroke(self, gp_stroke, gp_points):
+        if close_points(gp_points[0], gp_points[-1]):
+            gp_stroke.use_cyclic = True #XXX Ignoring the no_close line style attribute for the time being
+            gp_points.pop()
+        else:
+            gp_stroke.use_cyclic = False
+        for i, point in enumerate(gp_points):
+            if close_points(point, gp_points[i - 1]): #XXX Hacky clean-up to remove duplicate points
+                continue
+            gp_stroke.points.add(1)
+            gp_stroke.points[-1].co.x = point[0]
+            gp_stroke.points[-1].co.y = point[1]
+        # Reset fill transforms
+        stroke_mat = gp_stroke.id_data.materials[gp_stroke.material_index]
+        if stroke_mat.grease_pencil.fill_style == "GRADIENT":
+            # So here's something weird... the origin and orientation of a GP stroke is defined by the first and second points on that stroke
+            v1 = gp_stroke.points[1].co - gp_stroke.points[0].co
+            v2 = mathutils.Vector((0, 1, 0)) # Because we're working in the XY plane
+            gp_stroke.uv_rotation = v1.angle(v2) + radians(-90.0)
+        # Adjust UV scale if the stroke has a gradient fill
+        if "swf_texture_type" in stroke_mat and stroke_mat["swf_texture_type"] == "gradient":
+            # Get the stroke's dimensions
+            #gp_stroke_dim = gp_stroke.bound_box_max - gp_stroke.bound_box_min
+            ref_dim = 32768 / PIXELS_PER_TWIP / PIXELS_PER_METER
+            grad_sq_dim = mathutils.Vector((ref_dim, ref_dim))
+            grad_dim = mathutils.Vector((2.0, 2.0)) # It appears that strokes have a fixed initial size of 2x2
+            # Compare to the intended gradient dimensions
+            gp_stroke.uv_scale = grad_sq_dim[0] / grad_dim[0]
+        else:
+            gp_stroke.uv_scale = 1.0
+        # Texture coordinate origin is located -0.5, -0.5 from the location of the first point prior to any rotation, so we need some transform magic
+        gp_texture_origin = mathutils.Vector((-0.5, -0.5))
+        stroke_center = gp_stroke.bound_box_min.lerp(gp_stroke.bound_box_max, 0.5)
+        stroke_origin = gp_stroke.points[0].co.copy()
+        # Get the vector from the first point in the stroke to its center
+        v_to_center = stroke_center - stroke_origin
+        v_to_center.resize_2d()
+        print(v_to_center)
+        m_rotate = mathutils.Matrix.Rotation(gp_stroke.uv_rotation, 2, "Z")
+        # Rotate centering vector to UV space
+        v_to_center.rotate(m_rotate)
+        print(v_to_center)
+        # Calculate vector from the GP origin to the stroke center
+        v_to_center = gp_texture_origin + (v_to_center / 2)
+        print(v_to_center)
+        # Now rotate everything back to geometry space
+        m_rotate = mathutils.Matrix.Rotation(-gp_stroke.uv_rotation, 2, "Z")
+        v_to_center.rotate(m_rotate)
+        gp_stroke.uv_translation = v_to_center
+
+    def set_material_transforms(self, gp_mat, matrix):
+        gp_mat.grease_pencil.mix_factor = 0.0
+        gp_matrix = mathutils.Matrix([[matrix.scaleX, matrix.rotateSkew0, 0.0, matrix.translateX / PIXELS_PER_TWIP / PIXELS_PER_METER],
+                                      [matrix.rotateSkew1, matrix.scaleY, 0.0, matrix.translateY / PIXELS_PER_TWIP / PIXELS_PER_METER],
+                                      [0.0, 0.0, 1.0, 0.0],
+                                      [0.0, 0.0, 0.0, 1.0]])
+        if gp_mat.grease_pencil.fill_style == "GRADIENT":
+            #XXX The following doesn't seem to position the gradient correctly
+            # SWF makes the following assumptions:
+            #   * Linear gradients default to horizontal (Blender assumes vertical)
+            #   * Gradients are defined in a standard space called the "gradient square":
+            #     * Origin is 0,0 (image origin)
+            #     * Dimensions extend from (-16384,-16384) to (16384,16384) in twips
+            ref_dim = 32768 / PIXELS_PER_TWIP / PIXELS_PER_METER # size of the gradient square
+            gp_mat["swf_texture_type"] = "gradient"
+        elif gp_mat.grease_pencil.fill_style == "TEXTURE":
+            ref_dim = gp_mat.grease_pencil.fill_image.size[0] / PIXELS_PER_METER / 10 # size of image
+
+        #print(ref_dim, gp_matrix.decompose()[2][0])
+        #gp_mat["swf_texture_intended_width"] = gp_matrix.decompose()[2][0] * ref_dim
+        #gp_mat["swf_grad_sq_scaled_height"] = gp_matrix.decompose()[2][1] * ref_sim
+        gp_mat.grease_pencil.texture_scale[0] = gp_matrix.decompose()[2][0]
+        gp_mat.grease_pencil.texture_scale[1] = gp_matrix.decompose()[2][1]
+        gp_mat.grease_pencil.texture_offset[0] = gp_matrix.decompose()[0][0] - 0.5
+        gp_mat.grease_pencil.texture_offset[1] = -gp_matrix.decompose()[0][1] - 0.5
+        gp_mat.grease_pencil.texture_angle = gp_matrix.decompose()[1].to_euler()[2]
+
     def parse_tags(self, tags, is_sprite = False):
             # Parsing should basically look like this:
             #  * Iterate through all tags in order.
@@ -132,21 +209,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                     for shape in tag.shapes.records:
                         if shape.type == 1: # EndShapeRecord... this should be the last shape record
                             # Add the points for the last shape
-                            if close_points(gp_points[0], gp_points[-1]):
-                                gp_stroke.use_cyclic = True #XXX Ignoring the no_close line style attribute for the time being
-                                gp_points.pop()
-                            else:
-                                gp_stroke.use_cyclic = False
-                            for i, point in enumerate(gp_points):
-                                if close_points(point, gp_points[i - 1]): #XXX Hacky clean-up to remove duplicate points
-                                    continue
-                                gp_stroke.points.add(1)
-                                gp_stroke.points[-1].co.x = point[0]
-                                gp_stroke.points[-1].co.y = point[1]
-                            # Reset fill transforms
-                            gp_stroke.uv_rotation = 0.0
-                            gp_stroke.uv_scale = 1.0
-                            gp_stroke.uv_translation = [0.0, 0.0]
+                            self.finish_stroke(gp_stroke, gp_points)
                             # Populate the swf_data dict with our newly imported stuff
                             self.swf_data[tag.characterId] = {"data": gp_data, "type": "shape"}
                             break
@@ -154,21 +217,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                             # If this isn't the first StyleChangeRecord, draw the points in the preceding stroke
                             if len(gp_points) > 1:
                                 #print("Shape Count:", shapecount)
-                                if close_points(gp_points[0], gp_points[-1]):
-                                    gp_stroke.use_cyclic = True #XXX Ignoring the no_close line style attribute for the time being
-                                    gp_points.pop()
-                                else:
-                                    gp_stroke.use_cyclic = False
-                                for i, point in enumerate(gp_points):
-                                    if close_points(point, gp_points[i - 1]): #XXX Hacky clean-up to remove duplicate points
-                                        continue
-                                    gp_stroke.points.add(1)
-                                    gp_stroke.points[-1].co.x = point[0]
-                                    gp_stroke.points[-1].co.y = point[1]
-                                # Reset fill transforms
-                                gp_stroke.uv_rotation = 0.0
-                                gp_stroke.uv_scale = 1.0
-                                gp_stroke.uv_translation = [0.0, 0.0]
+                                self.finish_stroke(gp_stroke, gp_points)
                                 #if shapecount == 10:
                                 #    print(shape.record_id)
                                 #    break
@@ -194,43 +243,21 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                                     if fill_style.type == 0: # Solid fill
                                         gp_mat.grease_pencil.fill_style = "SOLID"
                                         gp_mat.grease_pencil.fill_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.rgb)))
-                                    elif fill_style.type in [16, 18]: # Linear or Radial gradient
+                                    elif fill_style.type in [16, 18, 19]: # Linear or Radial gradient
                                         #XXX Only support for two-color gradients in GP fill style gradients; only using first and last gradient record
                                         gp_mat.grease_pencil.fill_style = "GRADIENT"
                                         if fill_style.type == 16:
                                             gp_mat.grease_pencil.gradient_type = "LINEAR"
-                                        elif fill_style.type == 18:
+                                        elif fill_style.type in [18, 19]:
                                             gp_mat.grease_pencil.gradient_type = "RADIAL"
                                         gp_mat.grease_pencil.fill_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.gradient.records[0].color)))
                                         gp_mat.grease_pencil.mix_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.gradient.records[-1].color)))
-                                        #XXX The following doesn't seem to position the gradient correctly
-                                        grad_matrix = fill_style.gradient_matrix
-                                        gp_mat.grease_pencil.mix_factor = 0.0
-                                        gp_matrix = mathutils.Matrix([[grad_matrix.scaleX, grad_matrix.rotateSkew0, 0.0, grad_matrix.translateX / PIXELS_PER_TWIP / PIXELS_PER_METER],
-                                                                      [grad_matrix.rotateSkew1, grad_matrix.scaleY, 0.0, grad_matrix.translateY / PIXELS_PER_TWIP / PIXELS_PER_METER],
-                                                                      [0.0, 0.0, 1.0, 0.0],
-                                                                      [0.0, 0.0, 0.0, 1.0]])
-                                        gp_mat.grease_pencil.texture_offset[0] = gp_matrix.decompose()[0][0] + 0.8 #XXX Nonsensical hardcoded correction value
-                                        gp_mat.grease_pencil.texture_offset[1] = gp_matrix.decompose()[0][1] + 0.8 #XXX Nonsensical hardcoded correction value
-                                        gp_mat.grease_pencil.texture_angle = gp_matrix.decompose()[1].to_euler()[2] + radians(135.0) #XXX SWF assumes a diagonal gradient to start?
-                                        gp_mat.grease_pencil.texture_scale[0] = gp_matrix.decompose()[2][0] + 0.3 #XXX Nonsensical hardcoded correction value
-                                        gp_mat.grease_pencil.texture_scale[1] = gp_matrix.decompose()[2][1] + 0.3 #XXX Nonsensical hardcoded correction value
+                                        self.set_material_transforms(gp_mat, fill_style.gradient_matrix)
                                     elif fill_style.type in [64, 65, 66, 67]: # Bitmap fill
                                         gp_mat.grease_pencil.fill_style = "TEXTURE"
                                         image = self.swf_data[fill_style.bitmap_id]["data"]
                                         gp_mat.grease_pencil.fill_image = image
-                                        gp_mat.grease_pencil.mix_factor = 0.0
-                                        #XXX The following doesn't seem to position the image correctly
-                                        img_matrix = fill_style.bitmap_matrix
-                                        gp_matrix = mathutils.Matrix([[img_matrix.scaleX, img_matrix.rotateSkew0, 0.0, img_matrix.translateX / PIXELS_PER_TWIP / PIXELS_PER_METER],
-                                                                      [img_matrix.rotateSkew1, img_matrix.scaleY, 0.0, img_matrix.translateY / PIXELS_PER_TWIP / PIXELS_PER_METER],
-                                                                      [0.0, 0.0, 1.0, 0.0],
-                                                                      [0.0, 0.0, 0.0, 1.0]])
-                                        gp_mat.grease_pencil.texture_offset[0] = gp_matrix.decompose()[0][0]
-                                        gp_mat.grease_pencil.texture_offset[1] = gp_matrix.decompose()[0][1]
-                                        gp_mat.grease_pencil.texture_angle = gp_matrix.decompose()[1].to_euler()[2]
-                                        gp_mat.grease_pencil.texture_scale[0] = gp_matrix.decompose()[2][0] / 5
-                                        gp_mat.grease_pencil.texture_scale[1] = gp_matrix.decompose()[2][1] / 5
+                                        self.set_material_transforms(gp_mat, fill_style.bitmap_matrix)
 
                                     gp_mat.grease_pencil.show_fill = True
                                 else:
@@ -350,6 +377,8 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
     def execute(self, context):
         swf = load_swf(context, self.filepath)
 
+        bpy.ops.object.mode_set(mode='OBJECT')
+
         if self.clear_scene:
             for ob in bpy.data.objects:
                 bpy.data.objects.remove(ob, do_unlink = True)
@@ -362,6 +391,8 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                 camera_collection = bpy.data.collections[bpy.data.collections.find("Camera")]
             camera_collection.objects.link(camera_ob)
             bpy.context.scene.camera = camera_ob
+            area = next(area for area in bpy.context.screen.areas if area.type == 'VIEW_3D')
+            area.spaces[0].region_3d.view_perspective = 'CAMERA'
 
         if self.import_world:
             build_world(swf)
