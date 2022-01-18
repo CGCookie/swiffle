@@ -124,17 +124,16 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         # Get the vector from the first point in the stroke to its center
         v_to_center = stroke_center - stroke_origin
         v_to_center.resize_2d()
-        print(v_to_center)
-        m_rotate = mathutils.Matrix.Rotation(gp_stroke.uv_rotation, 2, "Z")
+        m_rotate = mathutils.Matrix.Rotation(-gp_stroke.uv_rotation, 2, "Z")
         # Rotate centering vector to UV space
-        v_to_center.rotate(m_rotate)
-        print(v_to_center)
+        v_to_center = gp_texture_origin + (m_rotate @ (v_to_center - gp_texture_origin))
         # Calculate vector from the GP origin to the stroke center
         v_to_center = gp_texture_origin + (v_to_center / 2)
-        print(v_to_center)
         # Now rotate everything back to geometry space
-        m_rotate = mathutils.Matrix.Rotation(-gp_stroke.uv_rotation, 2, "Z")
-        v_to_center.rotate(m_rotate)
+        #XXX Nothing here seems to work!
+        #m_rotate = mathutils.Matrix.Rotation(gp_stroke.uv_rotation, 2, "Z")
+        #v_to_center.rotate(m_rotate)
+        #v_to_center = gp_texture_origin + (m_rotate @ (v_to_center - gp_texture_origin))
         gp_stroke.uv_translation = v_to_center
 
     def set_material_transforms(self, gp_mat, matrix):
@@ -275,7 +274,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                             # Start creating a stroke, but don't commit it yet
                             gp_stroke = gp_frame.strokes.new()
                             if "swf_linewidth" in gp_mat.keys():
-                                gp_stroke.line_width = (gp_mat["swf_linewidth"] / PIXELS_PER_TWIP) * 10 #XXX Hardcoded multiplier...not sure it's right yet
+                                gp_stroke.line_width = int((gp_mat["swf_linewidth"] / PIXELS_PER_TWIP)) * 10 #XXX Hardcoded multiplier...not sure it's right yet
                             else:
                                 gp_stroke.line_width = 0
                             gp_stroke.display_mode = "3DSPACE"
@@ -377,7 +376,8 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
     def execute(self, context):
         swf = load_swf(context, self.filepath)
 
-        bpy.ops.object.mode_set(mode='OBJECT')
+        if context.active_object is not None and context.active_object.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode='OBJECT')
 
         if self.clear_scene:
             for ob in bpy.data.objects:

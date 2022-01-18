@@ -32,6 +32,8 @@ Dependency = namedtuple("Dependency", ["module", "package", "name"])
 # of the arguments. DO NOT use this to import other parts of your Python add-on, import them as usual with an
 # "import" statement.
 dependencies = (
+    Dependency(module="PIL", package="pillow", name="pillow"),
+    Dependency(module="six", package=None, name=None),
     Dependency(module="lxml", package=None, name=None),
     Dependency(module="pylzma", package=None, name=None)
 )

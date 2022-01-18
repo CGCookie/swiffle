@@ -53,10 +53,10 @@ def build_world(swfdata):
     camera.location = [0, 0, 10]
     camera.rotation_euler = [0, 0, 0]
 
-    bpy.context.scene.render.resolution_x = width
-    bpy.context.scene.render.resolution_y = height
-    bpy.context.scene.render.fps = swfdata.header.frame_rate
-    bpy.context.scene.frame_end = swfdata.header.frame_count
+    bpy.context.scene.render.resolution_x = int(width)
+    bpy.context.scene.render.resolution_y = int(height)
+    bpy.context.scene.render.fps = int(swfdata.header.frame_rate)
+    bpy.context.scene.frame_end = int(swfdata.header.frame_count)
     bpy.context.scene.world.color = hex_to_rgb(hex(ColorUtils.rgb(bg_tag[0].color)))
     bpy.data.worlds["World"].node_tree.nodes["Background"].inputs[0].default_value = hex_to_rgba(hex(ColorUtils.rgb(bg_tag[0].color)))
 

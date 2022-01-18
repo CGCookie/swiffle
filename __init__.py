@@ -22,7 +22,7 @@ bl_info = {
     "name": "Adobe SWF format",
     "author": "Jason van Gumster (Fweeb)",
     "version": (0, 1),
-    "blender": (2, 93, 0),
+    "blender": (3, 0, 0),
     "location": "File > Import-Export",
     "description": "Import-Export SWF to and from Grease Pencil objects",
     "warning": "This add-on requires installing dependencies",
@@ -87,6 +87,8 @@ class preferences(bpy.types.AddonPreferences):
         layout = self.layout
 
         lines = [f"This add-on requires a couple Python packages to be installed:",
+                 f"  - pillow",
+                 f"  - six",
                  f"  - lxml",
                  f"  - pylzma",
                  f"Click the Install Dependencies button below to install them."]

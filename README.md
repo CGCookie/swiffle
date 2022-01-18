@@ -6,6 +6,8 @@ This is an add-on for importing and exporting Adobe SWF files to and from Blende
 
 This add-on requires that you install a few Python modules in order for it to work. There's a handy button in the add-on's Preferences to install them for you. Clicking that button installs the following two modules where Blender's Python interpreter can see them:
 
+  * pillow
+  * six
   * lxml
   * pylzma
 
