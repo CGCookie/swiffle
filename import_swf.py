@@ -89,8 +89,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         object.keyframe_insert("scale")
 
     def create_stroke_from_edge_map(self, edge_map, gp_data, gp_frame, stroke_type):
-        #for path_idx in reversed(edge_map.keys()):
-        for path_idx in edge_map.keys():
+        for path_idx in reversed(edge_map.keys()):
             gp_stroke = gp_frame.strokes.new()
             # Figure out which material to use
             first_edge = edge_map[path_idx][0]
@@ -338,12 +337,12 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                     gp_frame = gp_layer.frames.new(bpy.context.scene.frame_current) #XXX This is only the first frame... not all of them
 
                     # Start creating shapes
-                    # Start with lines
-                    for edge_map in tag.shapes.line_edge_maps:
-                        self.create_stroke_from_edge_map(edge_map, gp_data, gp_frame, "line")
-                    # Now the fills
+                    # Start with fills
                     for edge_map in tag.shapes.fill_edge_maps:
                         self.create_stroke_from_edge_map(edge_map, gp_data, gp_frame, "fill")
+                    # Now the lines
+                    for edge_map in tag.shapes.line_edge_maps:
+                        self.create_stroke_from_edge_map(edge_map, gp_data, gp_frame, "line")
                     # Populate the swf_data dict with our newly imported stuff
                     self.swf_data[tag.characterId] = {"data": gp_data, "type": "shape"}
 
