@@ -143,10 +143,10 @@ class SWFShape(_dumb_repr):
                     sub_path = []
 
                 if rec.state_new_styles:
-                    fs_offset = len(self._fillStyles)
-                    ls_offset = len(self._lineStyles)
                     self._append_to(self._fillStyles, rec.fill_styles)
                     self._append_to(self._lineStyles, rec.line_styles)
+                    fs_offset = len(self._fillStyles)
+                    ls_offset = len(self._lineStyles)
 
                 if rec.state_line_style and rec.state_fill_style0 and rec.state_fill_style1 and \
                     rec.line_style == 0 and rec.fill_style0 == 0 and rec.fill_style1 == 0:
