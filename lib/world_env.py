@@ -36,22 +36,9 @@ def hex_to_rgba(value):
     return tuple(rgba)
 
 
-def build_world(swfdata):
-    # Divide by 20 because SWF units are in "twips", 1/20 of a pixel
-    width = (swfdata.header.frame_size.xmax - swfdata.header.frame_size.xmin) / PIXELS_PER_TWIP
-    height = (swfdata.header.frame_size.ymax - swfdata.header.frame_size.ymin) / PIXELS_PER_TWIP
-
+def build_world(swfdata, width, height):
     # Background color (loops should result in just one tag)
     bg_tag = [x for x in swfdata.all_tags_of_type(TagSetBackgroundColor)]
-
-    #XXX Assume an orthographic camera because taking perspective into account when converting pixels to real units is hard
-    camera = bpy.context.scene.camera
-    camera.data.type = "ORTHO"
-    camera.data.ortho_scale = max([width, height]) / PIXELS_PER_METER
-    camera.data.shift_x = 0.5
-    camera.data.shift_y = -(min([width, height]) * 0.5) / max([width, height])
-    camera.location = [0, 0, 10]
-    camera.rotation_euler = [0, 0, 0]
 
     bpy.context.scene.render.resolution_x = int(width)
     bpy.context.scene.render.resolution_y = int(height)

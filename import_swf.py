@@ -164,13 +164,6 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
             v2 = mathutils.Vector((0, 1, 0)) # Because we're working in the XY plane
             gp_stroke.uv_rotation = v1.angle(v2) + radians(-90.0)
 
-        if new_stroke:
-            new_stroke = gp_frame.strokes.new()
-            new_stroke.material_index = gp_stroke.material_index
-            new_stroke.line_width = gp_stroke.line_width
-            new_stroke.display_mode = "3DSPACE"
-            return new_stroke # For SWF lines with discontinuities
-        '''
         # Adjust UV scale if the stroke has a gradient fill
         if "swf_texture_type" in stroke_mat and stroke_mat["swf_texture_type"] == "gradient":
             # Get the stroke's dimensions
@@ -200,7 +193,13 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         #v_to_center.rotate(m_rotate)
         #v_to_center = gp_texture_origin + (m_rotate @ (v_to_center - gp_texture_origin))
         gp_stroke.uv_translation = v_to_center
-        '''
+
+        if new_stroke:
+            new_stroke = gp_frame.strokes.new()
+            new_stroke.material_index = gp_stroke.material_index
+            new_stroke.line_width = gp_stroke.line_width
+            new_stroke.display_mode = "3DSPACE"
+            return new_stroke # For SWF lines with discontinuities
 
     def set_material_transforms(self, gp_mat, matrix):
         gp_mat.grease_pencil.mix_factor = 0.0
@@ -414,22 +413,48 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
             bpy.ops.object.mode_set(mode='OBJECT')
 
         if self.clear_scene:
+            #bpy.ops.wm.read_homefile(app_template="2D_Animation")
+            #if context.active_object is not None and context.active_object.mode != "OBJECT":
+            #    bpy.ops.object.mode_set(mode='OBJECT')
             for ob in bpy.data.objects:
                 bpy.data.objects.remove(ob, do_unlink = True)
-            camera_data = bpy.data.cameras.new("Camera")
-            camera_ob = bpy.data.objects.new("Camera", camera_data)
+            camera_data = bpy.data.cameras.new("SWF Camera")
+            camera_ob = bpy.data.objects.new("SWF Camera", camera_data)
             if bpy.data.collections.find("Camera") == -1:
-                camera_collection = bpy.data.collections.new("Camera")
-                bpy.context.scene.collection.link(camera_collection)
+                camera_collection = bpy.data.collections.new("SWF Camera")
+                bpy.context.scene.collection.children.link(camera_collection)
             else:
                 camera_collection = bpy.data.collections[bpy.data.collections.find("Camera")]
+                camera_collection.name = "SWF Camera"
             camera_collection.objects.link(camera_ob)
             bpy.context.scene.camera = camera_ob
             area = next(area for area in bpy.context.screen.areas if area.type == 'VIEW_3D')
             area.spaces[0].region_3d.view_perspective = 'CAMERA'
+        else:
+            # Still create the SWF Camera
+            camera_data = bpy.data.cameras.new("SWF Camera")
+            camera_ob = bpy.data.objects.new("SWF Camera", camera_data)
+            camera_collection = bpy.data.collections.new("SWF Camera")
+            camera_collection.objects.link(camera_ob)
+            bpy.context.scene.collection.children.link(camera_collection)
+
+        # Set up camera, regardless of whether we're adjusting all the world settings
+        width = (swf.header.frame_size.xmax - swf.header.frame_size.xmin) / PIXELS_PER_TWIP
+        height = (swf.header.frame_size.ymax - swf.header.frame_size.ymin) / PIXELS_PER_TWIP
+
+        #XXX Assume an orthographic camera because taking perspective into account when converting pixels to real units is hard
+        camera_ob.data.type = "ORTHO"
+        camera_ob.data.ortho_scale = max([width, height]) / PIXELS_PER_METER
+        camera_ob.data.shift_x = 0.5
+        camera_ob.data.shift_y = -(min([width, height]) * 0.5) / max([width, height])
+        camera_ob.location = [0, 0, 10]
+        camera_ob.rotation_euler = [0, 0, 0]
+        # Store the SWF resolution with the camera data in case we need it later
+        camera_ob.data["swf_resolution_x"] = int(width)
+        camera_ob.data["swf_resolution_y"] = int(height)
 
         if self.import_world:
-            build_world(swf)
+            build_world(swf, width, height)
 
         self.parse_tags(swf.tags)
 
