@@ -11,11 +11,14 @@ def load_swf(filepath):
 
 
 def show_edge_maps(edge_maps):
+    group_number = 0
     for em in edge_maps:
+        print("Group", group_number, " - Length:", len(em))
         for key, value in em.items():
             print(key)
             for edge in value:
                 print(edge)
+        group_number += 1
 
 # Single frame of a drawn character bust with gradients and textures
 testfile = os.path.abspath("./test/tradigital_animate_cc/10/completed/ch10-solid_drawing-closer_look-COMPLETED.swf")
