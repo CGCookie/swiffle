@@ -42,8 +42,8 @@ class SWFCurvedEdge(SWFStraightEdge):
 class SWFShape(_dumb_repr):
     def __init__(self, data=None, level=1, unit_divisor=20.0):
         self._records = []
-        self._fillStyles = []
-        self._lineStyles = []
+        self._fillStyles = self._initialFillStyles
+        self._lineStyles = self._initialLineStyles
         self._postLineStyles = {}
         self._edgeMapsCreated = False
         self.unit_divisor = unit_divisor
@@ -143,10 +143,10 @@ class SWFShape(_dumb_repr):
                     sub_path = []
 
                 if rec.state_new_styles:
-                    self._append_to(self._fillStyles, rec.fill_styles)
-                    self._append_to(self._lineStyles, rec.line_styles)
                     fs_offset = len(self._fillStyles)
                     ls_offset = len(self._lineStyles)
+                    self._append_to(self._fillStyles, rec.fill_styles)
+                    self._append_to(self._lineStyles, rec.line_styles)
 
                 if rec.state_line_style and rec.state_fill_style0 and rec.state_fill_style1 and \
                     rec.line_style == 0 and rec.fill_style0 == 0 and rec.fill_style1 == 0:

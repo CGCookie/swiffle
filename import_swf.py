@@ -27,7 +27,7 @@ def close_points(p1, p2):
         return False
 
 
-def load_swf(context, filepath):
+def load_swf(filepath):
     f = open(filepath, "rb")
     swf = SWF(f)
     #print(swf)
@@ -250,7 +250,9 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                 tag_collection = bpy.data.collections.new("SWF Sprite Tags")
             last_character = None
 
-            for tag in tags:
+            #for tag in tags:
+            for i, tag in enumerate(tags):
+                print(i, tag.name)
                 if tag.name == "End":
                     bpy.context.scene.frame_current = orig_frame
                     if is_sprite:
@@ -260,12 +262,10 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                     # Make a new Grease Pencil object to hold our shapes
                     gp_data = bpy.data.grease_pencils.new(tag.name + ".{0:03}".format(tag.characterId))
                     gp_data["swf_characterId"] = tag.characterId
-                    line_styles = tag.shapes._initialLineStyles
-                    fill_styles = tag.shapes._initialFillStyles
                     # Build fill and line maps with absolute coordinates and correct style indices
                     tag.shapes._create_edge_maps()
-                    line_styles.extend(tag.shapes._lineStyles)
-                    fill_styles.extend(tag.shapes._fillStyles)
+                    line_styles = tag.shapes._lineStyles
+                    fill_styles = tag.shapes._fillStyles
                     # Create materials based on initial fill and line styles
                     # This is a bit of a challenge because Grease Pencil materials don't separate fill and line styles for a given shape, so we have to parse the fill edge map and the line edge map to know the combinations ahead of time
                     style_combos = []
@@ -288,6 +288,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                             if style_combo not in style_combos:
                                 style_combos.append(style_combo)
                     # Now we create those materials
+                    print(style_combos)
                     for style_combo in style_combos:
                         # Using a convention here... "SWF Material_LSI-FSI" where LSI is the line style index and FSI is the fill style index
                         mat_name = "SWF Material_{0}-{1}".format(style_combo["line_style_idx"], style_combo["fill_style_idx"])
@@ -306,6 +307,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                         gp_mat["swf_line_style_idx"] = style_combo["line_style_idx"]
                         # Now the fill style
                         if style_combo["fill_style_idx"] > 0:
+                            print(style_combo["fill_style_idx"])
                             fill_style = fill_styles[style_combo["fill_style_idx"] - 1]
                             if fill_style.type == 0: # Solid fill
                                 gp_mat.grease_pencil.fill_style = "SOLID"
@@ -405,9 +407,10 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
 
                 if tag.name == "ShowFrame":
                     bpy.context.scene.frame_current += 1
+                    break #XXX Only show the first frame for now
 
     def execute(self, context):
-        swf = load_swf(context, self.filepath)
+        swf = load_swf(self.filepath)
 
         if context.active_object is not None and context.active_object.mode != "OBJECT":
             bpy.ops.object.mode_set(mode='OBJECT')
