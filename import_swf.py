@@ -77,6 +77,38 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
 
     swf_data = {}
 
+    def _find_material(self, materials, style_combo):
+        #XXX There's a chance that this loop may not find any proper combinations. Hopefully that never happens
+        mat_index = 0
+        for mat in materials:
+            if mat["swf_line_style_idx"] == style_combo["line_style_idx"] and mat["swf_fill_style_idx"] == style_combo["fill_style_idx"]:
+                return mat, mat_index
+            else:
+                mat_index += 1
+
+    def _new_gp_stroke(self, gp_data, gp_frame, copy_mat = False, materials = None, first_edge = None, old_stroke = None):
+        gp_stroke = gp_frame.strokes.new()
+        if copy_mat == False and first_edge is not None:
+            # Figure out which material to use
+            style_combo = {
+                "line_style_idx": first_edge.line_style_idx,
+                "fill_style_idx": first_edge.fill_style_idx
+            }
+            gp_mat, gp_stroke.material_index = self._find_material(gp_data.materials, style_combo)
+
+            if "swf_linewidth" in gp_mat.keys():
+                gp_stroke.line_width = int((gp_mat["swf_linewidth"] / PIXELS_PER_TWIP)) * 10 #XXX Hardcoded multiplier...not sure it's right yet
+            else:
+                gp_stroke.line_width = 0
+        elif old_stroke is not None:
+            gp_stroke.material_index = old_stroke.material_index
+            gp_stroke.line_width = old_stroke.line_width
+        gp_stroke.display_mode = "3DSPACE"
+        if copy_mat == False:
+            return gp_stroke, gp_mat
+        else:
+            return gp_stroke
+
     def key_transforms(self, object, matrix):
         #XXX Blender doesn't support shearing at the object level, so the rotateSkew0 and rotateSkew1 values can only be used for rotation
         m = mathutils.Matrix([[matrix.scaleX, matrix.rotateSkew0, 0.0, matrix.translateX / PIXELS_PER_TWIP / PIXELS_PER_METER],
@@ -89,35 +121,21 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         object.keyframe_insert("scale")
 
     def create_stroke_from_edge_map(self, edge_map, gp_data, gp_frame, stroke_type):
-        for path_idx in reversed(edge_map.keys()):
-            gp_stroke = gp_frame.strokes.new()
-            # Figure out which material to use
+        for path_idx in sorted(edge_map.keys()):
             first_edge = edge_map[path_idx][0]
-            style_combo = {
-                "line_style_idx": first_edge.line_style_idx,
-                "fill_style_idx": first_edge.fill_style_idx
-            }
-            #XXX There's a chance that this loop may not find any proper combinations. Hopefully that never happens
-            mat_index = 0
-            for mat in gp_data.materials:
-                if mat["swf_line_style_idx"] == style_combo["line_style_idx"] and mat["swf_fill_style_idx"] == style_combo["fill_style_idx"]:
-                    gp_mat = mat
-                    gp_stroke.material_index = mat_index
-                    break
-                else:
-                    mat_index += 1
-            if "swf_linewidth" in gp_mat.keys():
-                gp_stroke.line_width = int((gp_mat["swf_linewidth"] / PIXELS_PER_TWIP)) * 10 #XXX Hardcoded multiplier...not sure it's right yet
-            else:
-                gp_stroke.line_width = 0
-            gp_stroke.display_mode = "3DSPACE"
+            gp_stroke, gp_mat = self._new_gp_stroke(gp_data, gp_frame, first_edge = first_edge)
+
             # Now is where we start working through the edge data
             gp_points = [first_edge.start]
             for edge in edge_map[path_idx]:
+                # Grease pencil doesn't support different materials along a stroke, so we need to start a new stroke if we see one
+                if edge.line_style_idx != gp_mat["swf_line_style_idx"] or edge.fill_style_idx != gp_mat["swf_fill_style_idx"]:
+                    gp_stroke, gp_mat = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame, new_edge = edge)
+                    gp_points = [edge.start]
                 if type(edge) == SWFCurvedEdge:
                     # Grease pencil doesn't support "broken" strokes with inline discontinuities. Need to shove a new stroke in when that happens
                     if not close_points(edge.start, gp_points[-1]):
-                        gp_stroke = self.finalize_stroke(gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame)
+                        gp_stroke = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame)
                         gp_points = []
                         _points.append(edge.start)
                     knot1 = mathutils.Vector(edge.start)
@@ -133,14 +151,14 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                     _points = []
                     # Grease pencil doesn't support "broken" strokes with inline discontinuities. Need to shove a new stroke in when that happens
                     if not close_points(edge.start, gp_points[-1]):
-                        gp_stroke = self.finalize_stroke(gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame)
+                        gp_stroke = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame)
                         gp_points = []
                         _points.append(edge.start)
                     _points.append(edge.to)
                 gp_points.extend(_points)
-            self.finalize_stroke(gp_stroke, gp_points, stroke_type)
+            self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type)
 
-    def finalize_stroke(self, gp_stroke, gp_points, stroke_type, new_stroke = False, gp_frame = None):
+    def _finalize_stroke(self, gp_data, gp_stroke, gp_points, stroke_type, new_stroke = False, gp_frame = None, new_edge = None):
         # Finalize the stroke
         if stroke_type == "line":
             gp_stroke.use_cyclic = False #
@@ -195,11 +213,11 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         gp_stroke.uv_translation = v_to_center
 
         if new_stroke:
-            new_stroke = gp_frame.strokes.new()
-            new_stroke.material_index = gp_stroke.material_index
-            new_stroke.line_width = gp_stroke.line_width
-            new_stroke.display_mode = "3DSPACE"
-            return new_stroke # For SWF lines with discontinuities
+            # For SWF lines with discontinuities
+            if new_edge is None:
+                return self._new_gp_stroke(gp_data, gp_frame, copy_mat = True, old_stroke = gp_stroke)
+            else:
+                return self._new_gp_stroke(gp_data, gp_frame, first_edge = new_edge)
 
     def set_material_transforms(self, gp_mat, matrix):
         gp_mat.grease_pencil.mix_factor = 0.0
@@ -268,27 +286,27 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                     fill_styles = tag.shapes._fillStyles
                     # Create materials based on initial fill and line styles
                     # This is a bit of a challenge because Grease Pencil materials don't separate fill and line styles for a given shape, so we have to parse the fill edge map and the line edge map to know the combinations ahead of time
+                    # Also we have to go through every single edge because SWF supports changing styles midstream on a path. Gross.
                     style_combos = []
                     for edge_map in tag.shapes.line_edge_maps:
-                        for path_idx in edge_map.keys():
-                            first_edge = edge_map[path_idx][0]
-                            style_combo = {
-                                "line_style_idx": first_edge.line_style_idx,
-                                "fill_style_idx": first_edge.fill_style_idx
-                            }
-                            if style_combo not in style_combos:
-                                style_combos.append(style_combo)
+                        for edges in edge_map.values():
+                            for edge in edges:
+                                style_combo = {
+                                    "line_style_idx": edge.line_style_idx,
+                                    "fill_style_idx": edge.fill_style_idx
+                                }
+                                if style_combo not in style_combos:
+                                    style_combos.append(style_combo)
                     for edge_map in tag.shapes.fill_edge_maps: #XXX Partial copy pasta from above... assumes line edge maps is the same length as fill edge maps
-                        for path_idx in edge_map.keys():
-                            first_edge = edge_map[path_idx][0]
-                            style_combo = {
-                                "line_style_idx": first_edge.line_style_idx,
-                                "fill_style_idx": first_edge.fill_style_idx
-                            }
-                            if style_combo not in style_combos:
-                                style_combos.append(style_combo)
+                        for edges in edge_map.values():
+                            for edge in edges:
+                                style_combo = {
+                                    "line_style_idx": edge.line_style_idx,
+                                    "fill_style_idx": edge.fill_style_idx
+                                }
+                                if style_combo not in style_combos:
+                                    style_combos.append(style_combo)
                     # Now we create those materials
-                    print(style_combos)
                     for style_combo in style_combos:
                         # Using a convention here... "SWF Material_LSI-FSI" where LSI is the line style index and FSI is the fill style index
                         mat_name = "SWF Material_{0}-{1}".format(style_combo["line_style_idx"], style_combo["fill_style_idx"])
@@ -307,7 +325,6 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                         gp_mat["swf_line_style_idx"] = style_combo["line_style_idx"]
                         # Now the fill style
                         if style_combo["fill_style_idx"] > 0:
-                            print(style_combo["fill_style_idx"])
                             fill_style = fill_styles[style_combo["fill_style_idx"] - 1]
                             if fill_style.type == 0: # Solid fill
                                 gp_mat.grease_pencil.fill_style = "SOLID"
@@ -338,11 +355,13 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                     gp_frame = gp_layer.frames.new(bpy.context.scene.frame_current) #XXX This is only the first frame... not all of them
 
                     # Start creating shapes
-                    # Start with fills
-                    for edge_map in tag.shapes.fill_edge_maps:
+                    for em_group in range(0, len(tag.shapes.fill_edge_maps)):
+                        #XXX Assumes fill_edge_maps and line_edge_maps are of equal length
+                        # Start with fills
+                        edge_map = tag.shapes.fill_edge_maps[em_group]
                         self.create_stroke_from_edge_map(edge_map, gp_data, gp_frame, "fill")
-                    # Now the lines
-                    for edge_map in tag.shapes.line_edge_maps:
+                        # Now the lines
+                        edge_map = tag.shapes.line_edge_maps[em_group]
                         self.create_stroke_from_edge_map(edge_map, gp_data, gp_frame, "line")
                     # Populate the swf_data dict with our newly imported stuff
                     self.swf_data[tag.characterId] = {"data": gp_data, "type": "shape"}
