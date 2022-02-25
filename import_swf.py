@@ -120,43 +120,46 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         object.keyframe_insert("rotation_euler")
         object.keyframe_insert("scale")
 
-    def create_stroke_from_edge_map(self, edge_map, gp_data, gp_frame, stroke_type):
-        for path_idx in sorted(edge_map.keys()):
-            first_edge = edge_map[path_idx][0]
-            gp_stroke, gp_mat = self._new_gp_stroke(gp_data, gp_frame, first_edge = first_edge)
-
-            # Now is where we start working through the edge data
-            gp_points = [first_edge.start]
-            for edge in edge_map[path_idx]:
-                # Grease pencil doesn't support different materials along a stroke, so we need to start a new stroke if we see one
-                if edge.line_style_idx != gp_mat["swf_line_style_idx"] or edge.fill_style_idx != gp_mat["swf_fill_style_idx"]:
-                    gp_stroke, gp_mat = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame, new_edge = edge)
-                    gp_points = [edge.start]
-                if type(edge) == SWFCurvedEdge:
-                    # Grease pencil doesn't support "broken" strokes with inline discontinuities. Need to shove a new stroke in when that happens
-                    if not close_points(edge.start, gp_points[-1]):
-                        gp_stroke = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame)
-                        gp_points = []
-                        _points.append(edge.start)
-                    knot1 = mathutils.Vector(edge.start)
-                    knot2 = mathutils.Vector(edge.to)
-                    control = edge.control
-                    handle1 = knot1.lerp(mathutils.Vector(control), 2/3) # See SWF spec on converting from quadratic to cubic bezier curves
-                    handle2 = knot2.lerp(mathutils.Vector(control), 2/3)
-                    _points = mathutils.geometry.interpolate_bezier(knot1, handle1, handle2, knot2, 12) #XXX Hardcoded resolution value of 12
-                    # Prevent duplicate points
-                    if len(gp_points) > 0 and _points[0] == gp_points[-1]:
-                        del _points[0]
-                elif type(edge) == SWFStraightEdge:
-                    _points = []
-                    # Grease pencil doesn't support "broken" strokes with inline discontinuities. Need to shove a new stroke in when that happens
-                    if not close_points(edge.start, gp_points[-1]):
-                        gp_stroke = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame)
-                        gp_points = []
-                        _points.append(edge.start)
-                    _points.append(edge.to)
-                gp_points.extend(_points)
-            self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type)
+    def create_stroke_from_edge_map(self, shapes, edge_map, gp_data, gp_frame, stroke_type):
+        #for path_idx in sorted(edge_map.keys()):
+        path = shapes._create_path_from_edge_map(edge_map)
+        if len(path) > 0:
+            first_edge = path[0]
+        else:
+            return
+        gp_stroke, gp_mat = self._new_gp_stroke(gp_data, gp_frame, first_edge = first_edge)
+        # Now is where we start working through the edge data
+        gp_points = [first_edge.start]
+        for edge in path:
+            # Grease pencil doesn't support different materials along a stroke, so we need to start a new stroke if we see one
+            if edge.line_style_idx != gp_mat["swf_line_style_idx"] or edge.fill_style_idx != gp_mat["swf_fill_style_idx"]:
+                gp_stroke, gp_mat = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame, new_edge = edge)
+                gp_points = [edge.start]
+            if type(edge) == SWFCurvedEdge:
+                # Grease pencil doesn't support "broken" strokes with inline discontinuities. Need to shove a new stroke in when that happens
+                if not close_points(edge.start, gp_points[-1]):
+                    gp_stroke = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame)
+                    gp_points = []
+                    _points.append(edge.start)
+                knot1 = mathutils.Vector(edge.start)
+                knot2 = mathutils.Vector(edge.to)
+                control = edge.control
+                handle1 = knot1.lerp(mathutils.Vector(control), 2/3) # See SWF spec on converting from quadratic to cubic bezier curves
+                handle2 = knot2.lerp(mathutils.Vector(control), 2/3)
+                _points = mathutils.geometry.interpolate_bezier(knot1, handle1, handle2, knot2, 12) #XXX Hardcoded resolution value of 12
+                # Prevent duplicate points
+                if len(gp_points) > 0 and _points[0] == gp_points[-1]:
+                    del _points[0]
+            elif type(edge) == SWFStraightEdge:
+                _points = []
+                # Grease pencil doesn't support "broken" strokes with inline discontinuities. Need to shove a new stroke in when that happens
+                if not close_points(edge.start, gp_points[-1]):
+                    gp_stroke = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame)
+                    gp_points = []
+                    _points.append(edge.start)
+                _points.append(edge.to)
+            gp_points.extend(_points)
+        self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type)
 
     def _finalize_stroke(self, gp_data, gp_stroke, gp_points, stroke_type, new_stroke = False, gp_frame = None, new_edge = None):
         # Finalize the stroke
@@ -359,10 +362,10 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                         #XXX Assumes fill_edge_maps and line_edge_maps are of equal length
                         # Start with fills
                         edge_map = tag.shapes.fill_edge_maps[em_group]
-                        self.create_stroke_from_edge_map(edge_map, gp_data, gp_frame, "fill")
+                        self.create_stroke_from_edge_map(tag.shapes, edge_map, gp_data, gp_frame, "fill")
                         # Now the lines
                         edge_map = tag.shapes.line_edge_maps[em_group]
-                        self.create_stroke_from_edge_map(edge_map, gp_data, gp_frame, "line")
+                        self.create_stroke_from_edge_map(tag.shapes, edge_map, gp_data, gp_frame, "line")
                     # Populate the swf_data dict with our newly imported stuff
                     self.swf_data[tag.characterId] = {"data": gp_data, "type": "shape"}
 
