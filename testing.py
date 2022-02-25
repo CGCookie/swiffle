@@ -33,6 +33,31 @@ def show_edge_maps(edge_maps):
                 last_edge = edge
         group_number += 1
 
+
+def show_paths_from_edge_maps(shapes):
+    group_number = 0
+    print("Fills")
+    for em in shapes.fill_edge_maps:
+        print("Group", group_number, " - Length:", len(em))
+        path = shapes._create_path_from_edge_map(em)
+        last_edge = None
+        for edge in path:
+            if last_edge is not None and not (close_points(edge.start, last_edge.to)):
+                print("New stroke")
+            print(edge)
+            last_edge = edge
+    print("Lines")
+    for em in shapes.line_edge_maps:
+        print("Group", group_number, " - Length:", len(em))
+        path = shapes._create_path_from_edge_map(em)
+        last_edge = None
+        for edge in path:
+            if last_edge is not None and not (close_points(edge.start, last_edge.to)):
+                print("New stroke")
+            print(edge)
+            last_edge = edge
+
+
 # Single frame of a drawn character bust with gradients and textures
 testfile = os.path.abspath("./test/tradigital_animate_cc/10/completed/ch10-solid_drawing-closer_look-COMPLETED.swf")
 faceswf = load_swf(testfile)
