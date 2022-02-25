@@ -1,4 +1,5 @@
 import os
+from math import isclose
 
 from lib.swf.movie import SWF
 
@@ -10,14 +11,26 @@ def load_swf(filepath):
     return swf
 
 
+
+def close_points(p1, p2):
+    if isclose(p1[0], p2[0], rel_tol=1e-5) and isclose(p1[1], p2[1], rel_tol=1e-5):
+        return True
+    else:
+        return False
+
+
 def show_edge_maps(edge_maps):
     group_number = 0
     for em in edge_maps:
         print("Group", group_number, " - Length:", len(em))
         for key, value in em.items():
             print(key)
+            last_edge = None
             for edge in value:
+                if last_edge is not None and not (close_points(edge.start, last_edge.to)):
+                    print("New stroke")
                 print(edge)
+                last_edge = edge
         group_number += 1
 
 # Single frame of a drawn character bust with gradients and textures
