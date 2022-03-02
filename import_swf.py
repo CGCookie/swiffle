@@ -1,4 +1,5 @@
 import bpy
+import aud
 import os
 import mathutils
 from bpy_extras.io_utils import ImportHelper
@@ -277,6 +278,8 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
 
             orig_frame = bpy.context.scene.frame_current
             bpy.context.scene.frame_current = 1
+            sound_head = None
+            mpeg_frames = b""
 
             if is_sprite:
                 # Make container collection for this set of tags
@@ -288,10 +291,20 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                 print(i, tag.name)
                 if tag.name == "End":
                     bpy.context.scene.frame_current = orig_frame
+                    if len(mpeg_frames) > 0: # There is sound
+                        sound_file = open("/tmp/swf_sound.mp3", "wb") #XXX Path should probably be customizable
+                        sound_file.write(mpeg_frames)
+                        sound_file.close()
+                        if not bpy.context.scene.sequence_editor:
+                            bpy.context.scene.sequence_editor_create()
+                        sound_strip = bpy.context.scene.sequence_editor.sequences.new_sound("swf_sound", "/tmp/swf_sound.mp3", 0, 1)
                     if is_sprite:
                         return tag_collection
 
                 if tag.name.startswith("DefineShape"): # We have a new object to add!
+                    #XXX DEBUG
+                    #if tag.characterId == 2:
+                    #    break
                     # Make a new Grease Pencil object to hold our shapes
                     gp_data = bpy.data.grease_pencils.new(tag.name + ".{0:03}".format(tag.characterId))
                     gp_data["swf_characterId"] = tag.characterId
@@ -449,9 +462,19 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                         for slot in last_character.material_slots:
                             slot.material.grease_pencil.mix_factor = mix_factor
 
+                if tag.name.startswith("TagSoundStreamHead"):
+                    sound_head = tag
+
+                if tag.name == "TagSoundStreamBlock":
+                    if sound_head.soundFormat == 2: # MP3
+                        #XXX Currently only supporting embedded MP3
+                        #XXX Also assumes a single embedded sound
+                        tag.complete_parse_with_header(sound_head)
+                        mpeg_frames += tag.mpegFrames
+                
                 if tag.name == "ShowFrame":
                     bpy.context.scene.frame_current += 1
-                    break #XXX Only show the first frame for now
+                    #break #XXX Only show the first frame for now
 
     def execute(self, context):
         swf = load_swf(self.filepath)
