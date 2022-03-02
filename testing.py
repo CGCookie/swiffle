@@ -20,25 +20,30 @@ def close_points(p1, p2):
 
 
 def show_edge_maps(edge_maps):
-    group_number = 0
+    set_number = 0
     for em in edge_maps:
-        print("Group", group_number, " - Length:", len(em))
+        print("Set", set_number, " - Length:", len(em))
         for key, value in em.items():
-            print(key)
+            print("Edge Map Index:", key)
             last_edge = None
             for edge in value:
                 if last_edge is not None and not (close_points(edge.start, last_edge.to)):
                     print("New stroke")
                 print(edge)
                 last_edge = edge
-        group_number += 1
+        set_number += 1
 
 
 def show_paths_from_edge_maps(shapes):
-    group_number = 0
+    set_number = 0
     print("Fills")
     for em in shapes.fill_edge_maps:
-        print("Group", group_number, " - Length:", len(em))
+        # Check for holes and collect to a separate em
+        if 0 in em:
+            em_holes = em.pop(0)
+        else:
+            em_holes = None
+        print("Set", set_number, " - Length:", len(em))
         path = shapes._create_path_from_edge_map(em)
         last_edge = None
         for edge in path:
@@ -46,9 +51,16 @@ def show_paths_from_edge_maps(shapes):
                 print("New stroke")
             print(edge)
             last_edge = edge
+        # Handle holes
+        print("Holes")
+        if em_holes is not None:
+            for edge in em_holes:
+                print(edge)
+        set_number += 1
+    set_number = 0
     print("Lines")
     for em in shapes.line_edge_maps:
-        print("Group", group_number, " - Length:", len(em))
+        print("Set", set_number, " - Length:", len(em))
         path = shapes._create_path_from_edge_map(em)
         last_edge = None
         for edge in path:
@@ -56,6 +68,7 @@ def show_paths_from_edge_maps(shapes):
                 print("New stroke")
             print(edge)
             last_edge = edge
+        set_number += 1
 
 
 # Single frame of a drawn character bust with gradients and textures

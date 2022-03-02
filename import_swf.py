@@ -121,7 +121,11 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         object.keyframe_insert("scale")
 
     def create_stroke_from_edge_map(self, shapes, edge_map, gp_data, gp_frame, stroke_type):
-        #for path_idx in sorted(edge_map.keys()):
+        # Look for holes, but handle them later
+        if stroke_type == "fill" and 0 in edge_map:
+            em_holes = {0: edge_map.pop(0)}
+        else:
+            em_holes = None
         path = shapes._create_path_from_edge_map(edge_map)
         if len(path) > 0:
             first_edge = path[0]
@@ -131,6 +135,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         # Now is where we start working through the edge data
         gp_points = [first_edge.start]
         for edge in path:
+            print(edge)
             # Grease pencil doesn't support different materials along a stroke, so we need to start a new stroke if we see one
             if edge.line_style_idx != gp_mat["swf_line_style_idx"] or edge.fill_style_idx != gp_mat["swf_fill_style_idx"]:
                 gp_stroke, gp_mat = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame, new_edge = edge)
@@ -160,12 +165,19 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                 _points.append(edge.to)
             gp_points.extend(_points)
         self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type)
+        # Handle holes (this is recursive, but hopefully it's OK)
+        if em_holes is not None:
+            #XXX Hack... forcing fill and line style indices to 0
+            for edge in em_holes[0]:
+                edge.fill_style_idx = 0
+                edge.line_style_idx = 0
+            self.create_stroke_from_edge_map(shapes, em_holes, gp_data, gp_frame, "hole")
 
     def _finalize_stroke(self, gp_data, gp_stroke, gp_points, stroke_type, new_stroke = False, gp_frame = None, new_edge = None):
         # Finalize the stroke
         if stroke_type == "line":
             gp_stroke.use_cyclic = False #
-        elif stroke_type == "fill":
+        elif stroke_type in ["fill", "hole"]:
             gp_stroke.use_cyclic = True
         for i, point in enumerate(gp_points):
             if close_points(point, gp_points[i - 1]): #XXX Hacky clean-up to remove duplicate points
@@ -352,6 +364,16 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                             gp_mat.grease_pencil.show_fill = False
                         gp_mat["swf_fill_style_idx"] = style_combo["fill_style_idx"]
                         gp_data.materials.append(gp_mat)
+
+                    # Make a holdout material for holes
+                    gp_mat = bpy.data.materials.new("SWF Holdout")
+                    bpy.data.materials.create_gpencil_data(gp_mat)
+                    gp_mat.grease_pencil.fill_style = "SOLID"
+                    gp_mat.grease_pencil.use_fill_holdout = True
+                    gp_mat.grease_pencil.show_fill = True
+                    gp_mat["swf_line_style_idx"] = 0
+                    gp_mat["swf_fill_style_idx"] = 0
+                    gp_data.materials.append(gp_mat)
 
                     # We need some basic layer stuff in our Grease Pencil object for drawing
                     gp_layer = gp_data.layers.new("Layer", set_active = True)
