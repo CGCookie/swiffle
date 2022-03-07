@@ -420,7 +420,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                     self.swf_data[tag.characterId] = {"data": img_datablock, "type": "image"}
 
                 if tag.name.startswith("PlaceObject"):
-                    if tag.hasCharacter and not tag.hasMove:
+                    if tag.hasCharacter:
                         # Add a new character (that we've already defined with ID of characterId)
                         character = self.swf_data[tag.characterId]
                         if character["type"] == "shape":
@@ -438,6 +438,39 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                         object["swf_depth"] = tag.depth
                         if hasattr(tag, "instanceName") and tag.instanceName is not None:
                             object.name = tag.instanceName
+
+                        if tag.hasMove:
+                            # Character at given depth is removed. New character (already defined with ID of characterId) is added at given depth
+                            #XXX This digs through all objects to find the one with the right 'swf_depth' custom property value... should be made faster
+                            characters_at_depth = []
+                            for ob in bpy.data.objects:
+                                if "swf_depth" in ob and ob["swf_depth"] == tag.depth:
+                                    characters_at_depth.append(ob)
+                            print(characters_at_depth)
+                            characters_at_depth.remove(object) # Should always be possible since we just added that object
+                            if len(characters_at_depth) > 0:
+                                for character in characters_at_depth:
+                                    character.hide_viewport = True
+                                    character.hide_render = True
+                                    character.keyframe_insert(data_path = "hide_viewport", frame = bpy.context.scene.frame_current)
+                                    character.keyframe_insert(data_path = "hide_render", frame = bpy.context.scene.frame_current)
+                                    last_character = character #XXX probably not the best way to do this
+                                object.location = last_character.location
+                                object.rotation_euler = last_character.rotation_euler
+                                object.scale = last_character.scale
+                            else:
+                                raise Exception("Trying to replace a character that was never placed")
+
+                        if bpy.context.scene.frame_current > 1:
+                            # We're adding the object after Frame 1, so hide it before that frame
+                            object.hide_viewport = True
+                            object.hide_render = True
+                            object.keyframe_insert(data_path = "hide_viewport", frame = 1)
+                            object.keyframe_insert(data_path = "hide_render", frame = 1)
+                        object.hide_viewport = False
+                        object.hide_render = False
+                        object.keyframe_insert(data_path = "hide_viewport", frame = bpy.context.scene.frame_current)
+                        object.keyframe_insert(data_path = "hide_render", frame = bpy.context.scene.frame_current)
                         last_character = object
 
                     elif not tag.hasCharacter and tag.hasMove:
@@ -449,10 +482,6 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                         else:
                             raise Exception("Trying to modify an object/character that has not yet been placed")
 
-                    #if tag.hasCharacter and tag.hasMove:
-                        # Character at given depth is removed. New character (already defined with ID of characterId) is added at given depth
-                        #break
-
                     if tag.hasColorTransform:
                         #XXX Perhaps not the best approach, the HSV modifier doesn't work on GP image textures
                         add_color = rgb_gamma([tag.colorTransform.rAdd, tag.colorTransform.gAdd, tag.colorTransform.bAdd], 2.2)
@@ -461,6 +490,16 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                         last_character.data.layers[0].tint_factor = 1.0
                         for slot in last_character.material_slots:
                             slot.material.grease_pencil.mix_factor = mix_factor
+
+                if tag.name == "RemoveObject2":
+                    #XXX Searches all objects... could be optimized somehow, I'm sure
+                    for ob in bpy.data.objects:
+                        if "swf_depth" in ob and ob["swf_depth"] == tag.depth:
+                            ob.hide_viewport = True
+                            ob.hide_render = True
+                            ob.keyframe_insert(data_path = "hide_viewport", frame = bpy.context.scene.frame_current)
+                            ob.keyframe_insert(data_path = "hide_render", frame = bpy.context.scene.frame_current)
+                            
 
                 if tag.name.startswith("TagSoundStreamHead"):
                     sound_head = tag
@@ -531,8 +570,9 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         # Hacky clean-up because I think SWF assumes all animations are loops
         for action in bpy.data.actions:
             for fcurve in action.fcurves:
-                modifier = fcurve.modifiers.new(type="CYCLES")
-                modifier.mode_before = "REPEAT"
-                modifier.mode_after = "REPEAT"
+                if fcurve.data_path in ["location", "rotation_euler", "scale"]:
+                    modifier = fcurve.modifiers.new(type="CYCLES")
+                    modifier.mode_before = "REPEAT"
+                    modifier.mode_after = "REPEAT"
 
         return {"FINISHED"}
