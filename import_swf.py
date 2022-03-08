@@ -117,9 +117,9 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                               [0.0, 0.0, 1.0, 0.0],
                               [0.0, 0.0, 0.0, 1.0]])
         object.matrix_world = m
-        object.keyframe_insert("location")
-        object.keyframe_insert("rotation_euler")
-        object.keyframe_insert("scale")
+        object.keyframe_insert(data_path = "location")
+        object.keyframe_insert(data_path = "rotation_euler")
+        object.keyframe_insert(data_path = "scale")
 
     def create_stroke_from_edge_map(self, shapes, edge_map, gp_data, gp_frame, stroke_type):
         # Look for holes, but handle them later
@@ -136,7 +136,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         # Now is where we start working through the edge data
         gp_points = [first_edge.start]
         for edge in path:
-            print(edge)
+            #print(edge)
             # Grease pencil doesn't support different materials along a stroke, so we need to start a new stroke if we see one
             if edge.line_style_idx != gp_mat["swf_line_style_idx"] or edge.fill_style_idx != gp_mat["swf_fill_style_idx"]:
                 gp_stroke, gp_mat = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame, new_edge = edge)
@@ -284,11 +284,12 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
             if is_sprite:
                 # Make container collection for this set of tags
                 tag_collection = bpy.data.collections.new("SWF Sprite Tags")
+                sprite_objects = [] # A simple list so we know which objects are part of this sprite
             last_character = None
 
             #for tag in tags:
             for i, tag in enumerate(tags):
-                print(i, tag.name)
+                #print(i, tag.name)
                 if tag.name == "End":
                     bpy.context.scene.frame_current = orig_frame
                     if len(mpeg_frames) > 0: # There is sound
@@ -299,12 +300,17 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                             bpy.context.scene.sequence_editor_create()
                         sound_strip = bpy.context.scene.sequence_editor.sequences.new_sound("swf_sound", "/tmp/swf_sound.mp3", 0, 1)
                     if is_sprite:
+                        # Hacky clean-up because I think SWF assumes all sprite animations are loops
+                        for ob in sprite_objects:
+                            action = ob.animation_data.action
+                            for fcurve in action.fcurves:
+                                    modifier = fcurve.modifiers.new(type="CYCLES")
+                                    modifier.mode_before = "REPEAT"
+                                    modifier.mode_after = "REPEAT"
+
                         return tag_collection
 
                 if tag.name.startswith("DefineShape"): # We have a new object to add!
-                    #XXX DEBUG
-                    #if tag.characterId == 2:
-                    #    break
                     # Make a new Grease Pencil object to hold our shapes
                     gp_data = bpy.data.grease_pencils.new(tag.name + ".{0:03}".format(tag.characterId))
                     gp_data["swf_characterId"] = tag.characterId
@@ -435,7 +441,12 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
 
                         if tag.hasMatrix:
                             self.key_transforms(object, tag.matrix)
+
                         object["swf_depth"] = tag.depth
+                        if is_sprite:
+                            object["swf_sprite_member"] = True
+                            sprite_objects.append(object)
+
                         if hasattr(tag, "instanceName") and tag.instanceName is not None:
                             object.name = tag.instanceName
 
@@ -444,20 +455,22 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                             #XXX This digs through all objects to find the one with the right 'swf_depth' custom property value... should be made faster
                             characters_at_depth = []
                             for ob in bpy.data.objects:
-                                if "swf_depth" in ob and ob["swf_depth"] == tag.depth:
+                                if "swf_depth" in ob and ob["swf_depth"] == tag.depth and ob.hide_viewport == False:
                                     characters_at_depth.append(ob)
-                            print(characters_at_depth)
-                            characters_at_depth.remove(object) # Should always be possible since we just added that object
-                            if len(characters_at_depth) > 0:
-                                for character in characters_at_depth:
-                                    character.hide_viewport = True
-                                    character.hide_render = True
-                                    character.keyframe_insert(data_path = "hide_viewport", frame = bpy.context.scene.frame_current)
-                                    character.keyframe_insert(data_path = "hide_render", frame = bpy.context.scene.frame_current)
-                                    last_character = character #XXX probably not the best way to do this
-                                object.location = last_character.location
-                                object.rotation_euler = last_character.rotation_euler
-                                object.scale = last_character.scale
+                            characters_at_depth.remove(object) # Should always be possible since we just added that object, results in a list with a length of 1
+                            if len(characters_at_depth) == 1:
+                                removed_character = characters_at_depth[0]
+                                removed_character.hide_viewport = True
+                                removed_character.hide_render = True
+                                removed_character.keyframe_insert(data_path = "hide_viewport", frame = bpy.context.scene.frame_current)
+                                removed_character.keyframe_insert(data_path = "hide_render", frame = bpy.context.scene.frame_current)
+                                object.location = removed_character.location
+                                object.rotation_euler = removed_character.rotation_euler
+                                object.scale = removed_character.scale
+                                object.keyframe_insert(data_path = "location")
+                                object.keyframe_insert(data_path = "rotation_euler")
+                                object.keyframe_insert(data_path = "scale")
+                                removed_character = None
                             else:
                                 raise Exception("Trying to replace a character that was never placed")
 
@@ -469,16 +482,26 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                             object.keyframe_insert(data_path = "hide_render", frame = 1)
                         object.hide_viewport = False
                         object.hide_render = False
-                        object.keyframe_insert(data_path = "hide_viewport", frame = bpy.context.scene.frame_current)
-                        object.keyframe_insert(data_path = "hide_render", frame = bpy.context.scene.frame_current)
+                        object.keyframe_insert(data_path = "hide_viewport")
+                        object.keyframe_insert(data_path = "hide_render")
                         last_character = object
 
                     elif not tag.hasCharacter and tag.hasMove:
                         # Character at given depth (only one character is allowed at a given depth) has been modified
-                        #XXX This only works if last_character has been previously set
-                        if last_character is not None:
+                        #XXX Expensive search
+                        character = None
+                        for ob in bpy.data.objects:
+                            if "swf_depth" in ob and ob["swf_depth"] == tag.depth and ob.hide_viewport == False:
+                                if not is_sprite and "swf_sprite_member" not in ob:
+                                    character = ob
+                                    break
+                                elif is_sprite and "swf_sprite_member" in ob and ob["swf_sprite_member"] == True:
+                                    character = ob
+                                    break
+
+                        if character is not None:
                             if tag.hasMatrix:
-                                self.key_transforms(last_character, tag.matrix)
+                                self.key_transforms(character, tag.matrix)
                         else:
                             raise Exception("Trying to modify an object/character that has not yet been placed")
 
@@ -494,17 +517,19 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                 if tag.name == "RemoveObject2":
                     #XXX Searches all objects... could be optimized somehow, I'm sure
                     for ob in bpy.data.objects:
-                        if "swf_depth" in ob and ob["swf_depth"] == tag.depth:
+                        if "swf_depth" in ob and ob["swf_depth"] == tag.depth and ob.hide_viewport == False: # Should only be one object
                             ob.hide_viewport = True
                             ob.hide_render = True
-                            ob.keyframe_insert(data_path = "hide_viewport", frame = bpy.context.scene.frame_current)
-                            ob.keyframe_insert(data_path = "hide_render", frame = bpy.context.scene.frame_current)
-                            
+                            ob.keyframe_insert(data_path = "hide_viewport")
+                            ob.keyframe_insert(data_path = "hide_render")
+                            break
 
                 if tag.name.startswith("TagSoundStreamHead"):
+                    print(tag.name)
                     sound_head = tag
 
                 if tag.name == "TagSoundStreamBlock":
+                    print(tag.name)
                     if sound_head.soundFormat == 2: # MP3
                         #XXX Currently only supporting embedded MP3
                         #XXX Also assumes a single embedded sound
@@ -512,6 +537,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                         mpeg_frames += tag.mpegFrames
                 
                 if tag.name == "ShowFrame":
+                    print(tag.name)
                     bpy.context.scene.frame_current += 1
                     #break #XXX Only show the first frame for now
 
@@ -566,13 +592,5 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
             build_world(swf, width, height)
 
         self.parse_tags(swf.tags)
-
-        # Hacky clean-up because I think SWF assumes all animations are loops
-        for action in bpy.data.actions:
-            for fcurve in action.fcurves:
-                if fcurve.data_path in ["location", "rotation_euler", "scale"]:
-                    modifier = fcurve.modifiers.new(type="CYCLES")
-                    modifier.mode_before = "REPEAT"
-                    modifier.mode_after = "REPEAT"
 
         return {"FINISHED"}
