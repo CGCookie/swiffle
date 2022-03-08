@@ -110,13 +110,14 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         else:
             return gp_stroke
 
-    def key_transforms(self, object, matrix):
+    def key_transforms(self, object, matrix, depth = 0):
         #XXX Blender doesn't support shearing at the object level, so the rotateSkew0 and rotateSkew1 values can only be used for rotation
         m = mathutils.Matrix([[matrix.scaleX, matrix.rotateSkew0, 0.0, matrix.translateX / PIXELS_PER_TWIP / PIXELS_PER_METER],
                               [matrix.rotateSkew1, matrix.scaleY, 0.0, -matrix.translateY / PIXELS_PER_TWIP / PIXELS_PER_METER],
                               [0.0, 0.0, 1.0, 0.0],
                               [0.0, 0.0, 0.0, 1.0]])
         object.matrix_world = m
+        object.location[2] = depth / 100
         object.keyframe_insert(data_path = "location")
         object.keyframe_insert(data_path = "rotation_euler")
         object.keyframe_insert(data_path = "scale")
@@ -440,7 +441,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                             tag_collection.objects.link(object)
 
                         if tag.hasMatrix:
-                            self.key_transforms(object, tag.matrix)
+                            self.key_transforms(object, tag.matrix, depth = tag.depth)
 
                         object["swf_depth"] = tag.depth
                         if is_sprite:
@@ -501,7 +502,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
 
                         if character is not None:
                             if tag.hasMatrix:
-                                self.key_transforms(character, tag.matrix)
+                                self.key_transforms(character, tag.matrix, depth = tag.depth)
                         else:
                             raise Exception("Trying to modify an object/character that has not yet been placed")
 
