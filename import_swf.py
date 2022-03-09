@@ -22,7 +22,7 @@ from .lib.swf.data import SWFCurvedEdge, SWFStraightEdge
 
 
 def close_points(p1, p2):
-    if isclose(p1[0], p2[0], rel_tol=1e-5) and isclose(p1[1], p2[1], rel_tol=1e-5):
+    if isclose(p1[0], p2[0], rel_tol=1e-5, abs_tol=0.001) and isclose(p1[1], p2[1], rel_tol=1e-5, abs_tol=0.001):
         return True
     else:
         return False
@@ -134,6 +134,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         else:
             return
         gp_stroke, gp_mat = self._new_gp_stroke(gp_data, gp_frame, first_edge = first_edge)
+
         # Now is where we start working through the edge data
         gp_points = [first_edge.start]
         for edge in path:
@@ -142,12 +143,15 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
             if edge.line_style_idx != gp_mat["swf_line_style_idx"] or edge.fill_style_idx != gp_mat["swf_fill_style_idx"]:
                 gp_stroke, gp_mat = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame, new_edge = edge)
                 gp_points = [edge.start]
+
+            _points = []
+            # Grease pencil doesn't support "broken" strokes with inline discontinuities. Need to shove a new stroke in when that happens
+            if not close_points(edge.start, gp_points[-1]):
+                gp_stroke = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame)
+                gp_points = []
+                _points.append(edge.start)
+
             if type(edge) == SWFCurvedEdge:
-                # Grease pencil doesn't support "broken" strokes with inline discontinuities. Need to shove a new stroke in when that happens
-                if not close_points(edge.start, gp_points[-1]):
-                    gp_stroke = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame)
-                    gp_points = []
-                    _points.append(edge.start)
                 knot1 = mathutils.Vector(edge.start)
                 knot2 = mathutils.Vector(edge.to)
                 control = edge.control
@@ -158,14 +162,10 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                 if len(gp_points) > 0 and _points[0] == gp_points[-1]:
                     del _points[0]
             elif type(edge) == SWFStraightEdge:
-                _points = []
-                # Grease pencil doesn't support "broken" strokes with inline discontinuities. Need to shove a new stroke in when that happens
-                if not close_points(edge.start, gp_points[-1]):
-                    gp_stroke = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame)
-                    gp_points = []
-                    _points.append(edge.start)
                 _points.append(edge.to)
+
             gp_points.extend(_points)
+
         self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type)
         # Handle holes (this is recursive, but hopefully it's OK)
         if em_holes is not None:
@@ -178,7 +178,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
     def _finalize_stroke(self, gp_data, gp_stroke, gp_points, stroke_type, new_stroke = False, gp_frame = None, new_edge = None):
         # Finalize the stroke
         if stroke_type == "line":
-            gp_stroke.use_cyclic = False #
+            gp_stroke.use_cyclic = False 
         elif stroke_type in ["fill", "hole"]:
             gp_stroke.use_cyclic = True
         for i, point in enumerate(gp_points):
@@ -210,6 +210,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
             gp_stroke.uv_scale = grad_sq_dim[0] / grad_dim[0]
         else:
             gp_stroke.uv_scale = 1.0
+        '''
         # Texture coordinate origin is located -0.5, -0.5 from the location of the first point prior to any rotation, so we need some transform magic
         gp_texture_origin = mathutils.Vector((-0.5, -0.5))
         stroke_center = gp_stroke.bound_box_min.lerp(gp_stroke.bound_box_max, 0.5)
@@ -228,7 +229,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         #v_to_center.rotate(m_rotate)
         #v_to_center = gp_texture_origin + (m_rotate @ (v_to_center - gp_texture_origin))
         gp_stroke.uv_translation = v_to_center
-
+        '''
         if new_stroke:
             # For SWF lines with discontinuities
             if new_edge is None:
@@ -526,11 +527,9 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                             break
 
                 if tag.name.startswith("TagSoundStreamHead"):
-                    print(tag.name)
                     sound_head = tag
 
                 if tag.name == "TagSoundStreamBlock":
-                    print(tag.name)
                     if sound_head.soundFormat == 2: # MP3
                         #XXX Currently only supporting embedded MP3
                         #XXX Also assumes a single embedded sound
@@ -538,7 +537,6 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                         mpeg_frames += tag.mpegFrames
                 
                 if tag.name == "ShowFrame":
-                    print(tag.name)
                     bpy.context.scene.frame_current += 1
                     #break #XXX Only show the first frame for now
 
