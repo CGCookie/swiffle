@@ -812,18 +812,19 @@ class SWFFillStyle(_dumb_repr):
         return set([self.bitmap_id]) if self.type in SWFFillStyle.BITMAP else set()
 
     def __eq__(self, other_fs):
-        if self.type == other_fs.type:
-            if self.type in SWFFillStyle.COLOR:
-                if self.rgb == other_fs.rgb:
-                    return True
-            elif self.type in SWFFillStyle.GRADIENT:
-                if self.gradient_matrix == other_fs.gradient_matrix and \
-                    self.gradient == other_fs.gradient:
-                    return True
-            elif self.type in SWFFillStyle.BITMAP:
-                if self.bitmap_id == other_fs.bitmap_id and \
-                    self.bitmap_matrix == other_fs.bitmap_matrix:
-                    return True
+        if other_fs is not None:
+            if self.type == other_fs.type:
+                if self.type in SWFFillStyle.COLOR:
+                    if self.rgb == other_fs.rgb:
+                        return True
+                elif self.type in SWFFillStyle.GRADIENT:
+                    if self.gradient_matrix == other_fs.gradient_matrix and \
+                        self.gradient == other_fs.gradient:
+                        return True
+                elif self.type in SWFFillStyle.BITMAP:
+                    if self.bitmap_id == other_fs.bitmap_id and \
+                        self.bitmap_matrix == other_fs.bitmap_matrix:
+                        return True
         return False
 
     def __str__(self):
@@ -862,20 +863,23 @@ class SWFLineStyle(_dumb_repr):
         self.color = data.readRGB() if level <= 2 else data.readRGBA()
 
     def __eq__(self, other_ls):
-        return (
-            self.start_caps_style == other_ls.start_caps_style and \
-            self.end_caps_style == other_ls.end_caps_style and \
-            self.joint_style == other_ls.joint_style and \
-            self.has_fill_flag == other_ls.has_fill_flag and \
-            self.no_hscale_flag == other_ls.no_hscale_flag and \
-            self.no_vscale_flag == other_ls.no_vscale_flag and \
-            self.pixelhinting_flag == other_ls.pixelhinting_flag and \
-            self.no_close == other_ls.no_close and \
-            self.miter_limit_factor == other_ls.miter_limit_factor and \
-            self.fill_type == other_ls.fill_type and \
-            self.width == other_ls.width and \
-            self.color == other_ls.color
-        )
+        if other_ls is not None:
+            return (
+                self.start_caps_style == other_ls.start_caps_style and \
+                self.end_caps_style == other_ls.end_caps_style and \
+                self.joint_style == other_ls.joint_style and \
+                self.has_fill_flag == other_ls.has_fill_flag and \
+                self.no_hscale_flag == other_ls.no_hscale_flag and \
+                self.no_vscale_flag == other_ls.no_vscale_flag and \
+                self.pixelhinting_flag == other_ls.pixelhinting_flag and \
+                self.no_close == other_ls.no_close and \
+                self.miter_limit_factor == other_ls.miter_limit_factor and \
+                self.fill_type == other_ls.fill_type and \
+                self.width == other_ls.width and \
+                self.color == other_ls.color
+            )
+        else:
+            return False
 
     def __str__(self):
         s = "[SWFLineStyle] "
