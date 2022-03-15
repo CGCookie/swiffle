@@ -107,19 +107,13 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
             ob_data.materials.append(mat)
         return mat
 
-    def _new_gp_stroke(self, gp_data, gp_frame, gp_mat, copy_mat = False):
+    def _new_gp_stroke(self, gp_data, gp_frame, gp_mat):
         gp_stroke = gp_frame.strokes.new()
         gp_stroke.material_index = {gp_mat.name: i for i, gp_mat in enumerate(gp_data.materials)}[gp_mat.name]
-        if copy_mat == False:
-            if "swf_linewidth" in gp_mat.keys():
-                gp_stroke.line_width = int((gp_mat["swf_linewidth"] / PIXELS_PER_TWIP)) * 10 #XXX Hardcoded multiplier...not sure it's right yet
-            else:
-                gp_stroke.line_width = 0
+        if "swf_linewidth" in gp_mat.keys():
+            gp_stroke.line_width = int((gp_mat["swf_linewidth"] / PIXELS_PER_TWIP)) * 10 #XXX Hardcoded multiplier...not sure it's right yet
         else:
-            if "swf_linewidth" in gp_mat.keys():
-                gp_stroke.line_width = gp_mat["swf_linewidth"]
-            else:
-                gp_stroke.line_width = 0
+            gp_stroke.line_width = 0
         gp_stroke.display_mode = "3DSPACE"
         return gp_stroke
 
@@ -199,9 +193,28 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
             self.create_stroke_from_edge_map(shapes, em_holes, gp_data, gp_frame, "hole")
 
     def _finalize_stroke(self, gp_data, gp_stroke, gp_points, stroke_type, new_stroke = False, gp_frame = None, new_mat = None):
+        stroke_mat = gp_stroke.id_data.materials[gp_stroke.material_index]
         # Finalize the stroke
         if stroke_type == "line":
-            gp_stroke.use_cyclic = False 
+            if "swf_no_close" in stroke_mat and stroke_mat["swf_no_close"] == False:
+                # If no_close is false AND the first and last points are the same, then make the stroke cyclic
+                if gp_points[0] == gp_points[-1]:
+                    gp_stroke.use_cyclic = True
+                else:
+                    gp_stroke.use_cyclic = False
+            else:
+                gp_stroke.use_cyclic = False
+
+            if "swf_start_cap_style" in stroke_mat and stroke_mat["swf_start_cap_style"] in ["none", "square"]:
+                gp_stroke.start_cap_mode = "FLAT"
+            else:
+                gp_stroke.start_cap_mode = "ROUND"
+
+            if "swf_end_cap_style" in stroke_mat and stroke_mat["swf_end_cap_style"] in ["none", "square"]:
+                gp_stroke.end_cap_mode = "FLAT"
+            else:
+                gp_stroke.end_cap_mode = "ROUND"
+
         elif stroke_type in ["fill", "hole"]:
             gp_stroke.use_cyclic = True
         for i, point in enumerate(gp_points):
@@ -213,7 +226,6 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
 
         # Deal with gradient and texture madness
         # Reset fill transforms
-        stroke_mat = gp_stroke.id_data.materials[gp_stroke.material_index]
         #if stroke_mat.grease_pencil.fill_style in ["GRADIENT", "TEXTURE"]:
         #    gp_stroke.use_accurate_normal = True #XXX Requires accurate normal patch from Jon Denning
         if stroke_mat.grease_pencil.fill_style == "GRADIENT":
@@ -257,7 +269,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
             # For SWF lines with discontinuities
             if new_mat is None:
                 gp_mat = gp_data.materials[gp_stroke.material_index]
-                return self._new_gp_stroke(gp_data, gp_frame, gp_mat, copy_mat = True)
+                return self._new_gp_stroke(gp_data, gp_frame, gp_mat)
             else:
                 return self._new_gp_stroke(gp_data, gp_frame, new_mat)
 
@@ -366,14 +378,36 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                 line_style = style_combo["line_style"]
                 gp_mat.grease_pencil.color  = hex_to_rgba(hex(ColorUtils.rgb(line_style.color)))
                 gp_mat["swf_linewidth"] = line_style.width
-                gp_mat["swf_line_miter"] = 3.0
                 gp_mat["swf_no_close"] = line_style.no_close
+                if line_style.start_caps_style == 0:
+                    gp_mat["swf_start_cap_style"] = "round"
+                elif line_style.start_caps_style == 1:
+                    gp_mat["swf_start_cap_style"] = "none"
+                elif line_style.start_caps_style == 2:
+                    gp_mat["swf_start_cap_style"] = "square"
+                if line_style.end_caps_style == 0:
+                    gp_mat["swf_end_cap_style"] = "round"
+                elif line_style.end_caps_style == 1:
+                    gp_mat["swf_end_cap_style"] = "none"
+                elif line_style.end_caps_style == 2:
+                    gp_mat["swf_end_cap_style"] = "square"
+                if line_style.has_fill_flag:
+                    #XXX TODO: set up texture or gradient fill for line style
+                    pass
+                # GP doesn't support mitering or different caps, but may as well record that data somewhere
+                gp_mat["swf_line_miter"] = line_style.miter_limit_factor
+                if line_style.joint_style == 0:
+                    gp_mat["swf_joint_style"] = "round"
+                elif line_style.joint_style == 1:
+                    gp_mat["swf_joint_style"] = "bevel"
+                elif line_style.joint_style == 2:
+                    gp_mat["swf_joint_style"] = "miter"
                 gp_mat.grease_pencil.show_stroke = True
             else:
                 gp_mat.grease_pencil.show_stroke = False
             # Now the fill style
             if style_combo["fill_style"] is not None:
-                fill_style =style_combo["fill_style"]
+                fill_style = style_combo["fill_style"]
                 if fill_style.type == 0: # Solid fill
                     gp_mat.grease_pencil.fill_style = "SOLID"
                     gp_mat.grease_pencil.fill_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.rgb)))
