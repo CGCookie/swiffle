@@ -133,14 +133,11 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
             for point in stroke.points:
                 point.co = transform_matrix @ point.co
 
-    def key_transforms(self, object, matrix, depth = 0):
+    def _key_transforms(self, object, matrix, depth = 0):
         #XXX Blender doesn't support shearing at the object level, so the rotateSkew0 and rotateSkew1 values can only be used for rotation
-        m = mathutils.Matrix([[matrix.scaleX, matrix.rotateSkew0, 0.0, matrix.translateX / PIXELS_PER_TWIP / PIXELS_PER_METER],
-                              [matrix.rotateSkew1, matrix.scaleY, 0.0, -matrix.translateY / PIXELS_PER_TWIP / PIXELS_PER_METER],
-                              [0.0, 0.0, 1.0, 0.0],
-                              [0.0, 0.0, 0.0, 1.0]])
+        m = swf_matrix_to_blender_matrix(matrix)
         object.matrix_world = m
-        object.location[2] = depth / 100
+        object.location[2] = depth / 100 # Hacky attempt to get at least some kind of z-order at the object level
         object.keyframe_insert(data_path = "location")
         object.keyframe_insert(data_path = "rotation_euler")
         object.keyframe_insert(data_path = "scale")
@@ -409,7 +406,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
             #    * Look for Define[Shape4,Sprite,etc] tags to dictate the actual objects added to the scene
             #      * DefineShape is another loop
             #        * In the the DefineShape4 is a property called shapes that has all the shapes
-            #        * There are subproperties, _initialFillStyles and _initialLineStyles that have stoke and fill definitions
+            #        * After running shapes._create_edge_maps(), there are properties, fillStyles and lineStyles that are arrays of material definitions for strokes
             #        * The shapes themselves seem to live in the records subproperty... treat them as a stream
             #          * Loop through shape records. Each StyleChangeRecord constitutes a new, disconnected GP stroke
             #    * The PlaceObject and PlaceObject2 tags (types 4 and 26, respectively) tell how and where assets are moved, based on their characterId (defined in the Define[blah] tag)
@@ -419,28 +416,30 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
             bpy.context.scene.frame_current = 1
             swf_object = None
 
-            if is_sprite:
-                # Make container collection for this set of tags
-                tag_collection = bpy.data.collections.new("SWF Sprite Tags")
-                self.swf_collection.children.link(tag_collection)
-                bpy.context.scene.view_layers[0].layer_collection.children[self.swf_collection.name].children[tag_collection.name].exclude = True #XXX Kind of hacky hardcoding of the default view layer
-                sprite_objects = [] # A simple list so we know which objects are part of this sprite
-            last_character = None
-
             #for tag in tags:
             for i, tag in enumerate(tags):
                 #print(i, tag.name)
                 if tag.name == "End":
                     if is_sprite:
+                        # Get first and last frames of this sprite
+                        frame_start = bpy.context.scene.frame_current
+                        frame_end = 0
+                        for layer in swf_object.data.layers:
+                            #XXX Assumes frames array is sorted by frame number
+                            if layer.frames[0].frame_number < frame_start:
+                                frame_start = layer.frames[0].frame_number
+                            if layer.frames[-1].frame_number > frame_end:
+                                frame_end = layer.frames[-1].frame_number
                         # Hacky clean-up because I think SWF assumes all sprite animations are loops
-                        for ob in sprite_objects:
-                            action = ob.animation_data.action
-                            for fcurve in action.fcurves:
-                                    modifier = fcurve.modifiers.new(type="CYCLES")
-                                    modifier.mode_before = "REPEAT"
-                                    modifier.mode_after = "REPEAT"
+                        if frame_start != frame_end:
+                            loop_modifier = swf_object.grease_pencil_modifiers.new("Cyclic Animation", "GP_TIME")
+                            loop_modifier.use_keep_loop = True
+                            loop_modifier.use_custom_frame_range = True
+                            loop_modifier.frame_start = frame_start
+                            loop_modifier.frame_end = frame_end - 1 #XXX Not sure the -1 is correct; but it made the test file play smoother
 
-                        return tag_collection
+                    bpy.context.scene.frame_current = orig_frame
+                    return swf_object
 
                 if tag.name.startswith("DefineShape"): # We have a new object to add!
                     # Make a new Grease Pencil object to hold our shapes
@@ -467,13 +466,11 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                     self.swf_data[tag.characterId] = {"data": gp_data, "type": "shape"}
 
                 if tag.name == "DefineSprite":
-                    sprite_collection = self.parse_tags(tag.tags, is_sprite = True)
-                    sprite_instance = bpy.data.objects.new(tag.name, None)
-                    sprite_instance["swf_characterId"] = tag.characterId
-                    sprite_instance.instance_type = "COLLECTION"
-                    sprite_instance.instance_collection = sprite_collection
+                    sprite_object = self.parse_tags(tag.tags, is_sprite = True)
+                    sprite_object["swf_characterId"] = tag.characterId
+                    sprite_object["swf_sprite"] = True
                     # Populate the swf_data dict with our newly imported stuff
-                    self.swf_data[tag.characterId] = {"data": sprite_instance, "type": "sprite"}
+                    self.swf_data[tag.characterId] = {"data": sprite_object, "type": "sprite"}
 
                 if tag.name.startswith("PlaceObject"):
                     if tag.hasCharacter:
@@ -481,10 +478,15 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                         character = self.swf_data[tag.characterId]
                         if character["type"] == "shape":
                             if swf_object is None:
+                                if not is_sprite:
+                                    swf_object = bpy.data.objects.new("SWF Object", character["data"].copy())
+                                    self.swf_collection.objects.link(swf_object)
+                                else:
+                                    swf_object = bpy.data.objects.new("SWF Sprite", character["data"].copy())
+                            elif "swf_sprite" in swf_object and swf_object["swf_sprite"] == True:
+                                #XXX If this PlaceObject tag happens after a sprite is placed, this creates a new SWF object. Not sure if that's the correct behavior or if we go back to the original SWF object
                                 swf_object = bpy.data.objects.new("SWF Object", character["data"].copy())
                                 self.swf_collection.objects.link(swf_object)
-                                #if tag.hasMatrix:
-                                #    self.key_transforms(swf_object, tag.matrix)
 
                             if len(swf_object.data.layers) == 1 and swf_object.data.layers[0].info == "Layer":
                                 # Rename the layer if this is the first layer
@@ -535,28 +537,33 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                                 layer_matrix = self.swf_layer_matrices[tag.depth]
                                 self._transform_strokes(frame.strokes, layer_matrix, swf_object.matrix_world)
                         elif character["type"] == "sprite":
-                            object = character["data"]
-
-                        # Little note: when a placed object is a sprite, it has a depth value, but since we're making that a new object in Blender, its zorder may not work well if it falls in the middle of a depth stack unless we adjust Z height of strokes.
-                        if is_sprite:
-                            tag_collection.objects.link(object)
-                            object["swf_depth"] = tag.depth
-                            object["swf_sprite_member"] = True
-                            sprite_objects.append(object)
-
+                            # Little note: when a placed object is a sprite, it has a depth value, but since we're making that a new object in Blender, its zorder may not work well if it falls in the middle of a depth stack unless we adjust Z height of strokes.
+                            swf_object = character["data"]
+                            swf_object["swf_depth"] = tag.depth
+                            self.swf_collection.objects.link(swf_object)
                             if hasattr(tag, "instanceName") and tag.instanceName is not None:
-                                object.name = tag.instanceName
+                                swf_object.name = tag.instanceName
+                            if tag.hasMatrix:
+                                self._key_transforms(swf_object, tag.matrix, depth = tag.depth)
+                            #XXX TODO: Support hasCharacter == True and hasMove == True (frame replacement animation for sprite objects); need a test file
 
                     elif not tag.hasCharacter and tag.hasMove:
                         # Character at given depth (only one character is allowed at a given depth) has been modified
-                        active_layer = swf_object.data.layers[str(tag.depth)]
-                        new_frame = active_layer.frames.copy(active_layer.frames[-1])
-                        new_frame.frame_number = bpy.context.scene.frame_current
-                        if tag.hasMatrix:
-                            layer_matrix = self.swf_layer_matrices[tag.depth]
-                            self._transform_strokes(new_frame.strokes, swf_object.matrix_world, layer_matrix) 
-                            self._transform_strokes(new_frame.strokes, tag.matrix, swf_object.matrix_world) #XXX Would be nice if I could bake these into a single matrix
-                            self.swf_layer_matrices[tag.depth] = swf_matrix_to_blender_matrix(tag.matrix)
+                        if "swf_sprite" not in swf_object:
+                            active_layer = swf_object.data.layers[str(tag.depth)]
+                            new_frame = active_layer.frames.copy(active_layer.frames[-1])
+                            new_frame.frame_number = bpy.context.scene.frame_current
+                            if tag.hasMatrix:
+                                layer_matrix = self.swf_layer_matrices[tag.depth]
+                                self._transform_strokes(new_frame.strokes, swf_object.matrix_world, layer_matrix) 
+                                self._transform_strokes(new_frame.strokes, tag.matrix, swf_object.matrix_world) #XXX Would be nice if I could bake these into a single matrix
+                                self.swf_layer_matrices[tag.depth] = swf_matrix_to_blender_matrix(tag.matrix)
+                        elif swf_object["swf_sprite"]:
+                            # Sprite objects, when placed, get object animation instead of GP frame animation
+                            if tag.hasMatrix: # This should almost always be true
+                                self._key_transforms(swf_object, tag.matrix, depth = tag.depth)
+                        else:
+                            print("Something is wrong; tried to modify an object with an swf_sprite property set to False. That should never happen.")
 
                     if tag.hasColorTransform:
                         #XXX Perhaps not the best approach, the HSV modifier doesn't work on GP image textures; hopefully resolves better when GP objects can have Eevee materials
@@ -578,8 +585,6 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                 if tag.name == "ShowFrame":
                     bpy.context.scene.frame_current += 1
                     #break #XXX Only show the first frame for now
-
-            bpy.context.scene.frame_current = orig_frame
 
     def execute(self, context):
         swf = load_swf(self.filepath)

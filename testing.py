@@ -165,3 +165,7 @@ gradswf = load_swf(testfile)
 # Simple object animation
 testfile = os.path.abspath("./test/wheel.swf")
 wheelswf = load_swf(testfile)
+
+# Simple PlaceObject test with sprites
+testfile = os.path.abspath("./test/placeobject3.swf")
+placeswf = load_swf(testfile)
