@@ -49,6 +49,15 @@ def pil_to_image(pil_image, name = "New Image"):
     bpy_image.pixels[:] = (np.asarray(pil_image.convert("RGBA"),dtype=np.float32) * byte_to_normalized).ravel()
     return bpy_image
 
+
+def swf_matrix_to_blender_matrix(matrix):
+    m = mathutils.Matrix([[matrix.scaleX, matrix.rotateSkew0, 0.0, matrix.translateX / PIXELS_PER_TWIP / PIXELS_PER_METER],
+                          [matrix.rotateSkew1, matrix.scaleY, 0.0, -matrix.translateY / PIXELS_PER_TWIP / PIXELS_PER_METER],
+                          [0.0, 0.0, 1.0, 0.0],
+                          [0.0, 0.0, 0.0, 1.0]])
+    return m
+
+
 class SWF_OT_import(bpy.types.Operator, ImportHelper):
     """Import SWF file as Grease Pencil animation"""
     bl_idname = "swf.import_swf"
@@ -77,38 +86,52 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
     )
 
     swf_data = {}
+    swf_style_map = []
+    swf_layer_matrices = {}
+    swf_collection = None
 
-    def _find_material(self, materials, style_combo):
-        #XXX There's a chance that this loop may not find any proper combinations. Hopefully that never happens
-        mat_index = 0
-        for mat in materials:
-            if mat["swf_line_style_idx"] == style_combo["line_style_idx"] and mat["swf_fill_style_idx"] == style_combo["fill_style_idx"]:
-                return mat, mat_index
-            else:
-                mat_index += 1
+    def _find_material(self, style_combo):
+        for mapping in self.swf_style_map:
+            if mapping["line_style"] == style_combo["line_style"] and mapping["fill_style"] == style_combo["fill_style"]:
+                return mapping["material"]
+        print("No matching material")
+        return None
 
-    def _new_gp_stroke(self, gp_data, gp_frame, copy_mat = False, materials = None, first_edge = None, old_stroke = None):
+    def _setup_material(self, ob_data, shapes, edge_map, edge):
+        style_combo = {
+            "line_style": shapes._lineStyles[edge.line_style_idx - 1] if edge.line_style_idx > 0 else None,
+            "fill_style": shapes._fillStyles[edge.fill_style_idx - 1] if edge.fill_style_idx > 0 else None
+        }
+        mat = self._find_material(style_combo)
+        if mat is not None and mat.name not in ob_data.materials:
+            ob_data.materials.append(mat)
+        return mat
+
+    def _new_gp_stroke(self, gp_data, gp_frame, gp_mat, copy_mat = False):
         gp_stroke = gp_frame.strokes.new()
-        if copy_mat == False and first_edge is not None:
-            # Figure out which material to use
-            style_combo = {
-                "line_style_idx": first_edge.line_style_idx,
-                "fill_style_idx": first_edge.fill_style_idx
-            }
-            gp_mat, gp_stroke.material_index = self._find_material(gp_data.materials, style_combo)
-
+        gp_stroke.material_index = {gp_mat.name: i for i, gp_mat in enumerate(gp_data.materials)}[gp_mat.name]
+        if copy_mat == False:
             if "swf_linewidth" in gp_mat.keys():
                 gp_stroke.line_width = int((gp_mat["swf_linewidth"] / PIXELS_PER_TWIP)) * 10 #XXX Hardcoded multiplier...not sure it's right yet
             else:
                 gp_stroke.line_width = 0
-        elif old_stroke is not None:
-            gp_stroke.material_index = old_stroke.material_index
-            gp_stroke.line_width = old_stroke.line_width
-        gp_stroke.display_mode = "3DSPACE"
-        if copy_mat == False:
-            return gp_stroke, gp_mat
         else:
-            return gp_stroke
+            if "swf_linewidth" in gp_mat.keys():
+                gp_stroke.line_width = gp_mat["swf_linewidth"]
+            else:
+                gp_stroke.line_width = 0
+        gp_stroke.display_mode = "3DSPACE"
+        return gp_stroke
+
+    def _transform_strokes(self, strokes, matrix, object_matrix):
+        if type(matrix) == mathutils.Matrix:
+            m = matrix
+        else:
+            m = swf_matrix_to_blender_matrix(matrix)
+        transform_matrix = object_matrix.inverted() @ m
+        for stroke in strokes:
+            for point in stroke.points:
+                point.co = transform_matrix @ point.co
 
     def key_transforms(self, object, matrix, depth = 0):
         #XXX Blender doesn't support shearing at the object level, so the rotateSkew0 and rotateSkew1 values can only be used for rotation
@@ -130,19 +153,22 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
             em_holes = None
         path = shapes._create_path_from_edge_map(edge_map)
         if len(path) > 0:
-            first_edge = path[0]
+            ref_edge = path[0]
+            gp_mat = self._setup_material(gp_data, shapes, edge_map, ref_edge)
         else:
             return
-        gp_stroke, gp_mat = self._new_gp_stroke(gp_data, gp_frame, first_edge = first_edge)
+        gp_stroke = self._new_gp_stroke(gp_data, gp_frame, gp_mat)
 
         # Now is where we start working through the edge data
-        gp_points = [first_edge.start]
+        gp_points = [ref_edge.start]
         for edge in path:
             #print(edge)
             # Grease pencil doesn't support different materials along a stroke, so we need to start a new stroke if we see one
-            if edge.line_style_idx != gp_mat["swf_line_style_idx"] or edge.fill_style_idx != gp_mat["swf_fill_style_idx"]:
-                gp_stroke, gp_mat = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame, new_edge = edge)
+            if edge.line_style_idx != ref_edge.line_style_idx or edge.fill_style_idx != ref_edge.fill_style_idx:
+                gp_mat = self._setup_material(gp_data, shapes, edge_map, edge)
+                gp_stroke = self._finalize_stroke(gp_data, gp_stroke, gp_points, stroke_type, new_stroke = True, gp_frame = gp_frame, new_mat = gp_mat)
                 gp_points = [edge.start]
+                ref_edge = edge
 
             _points = []
             # Grease pencil doesn't support "broken" strokes with inline discontinuities. Need to shove a new stroke in when that happens
@@ -175,7 +201,7 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                 edge.line_style_idx = 0
             self.create_stroke_from_edge_map(shapes, em_holes, gp_data, gp_frame, "hole")
 
-    def _finalize_stroke(self, gp_data, gp_stroke, gp_points, stroke_type, new_stroke = False, gp_frame = None, new_edge = None):
+    def _finalize_stroke(self, gp_data, gp_stroke, gp_points, stroke_type, new_stroke = False, gp_frame = None, new_mat = None):
         # Finalize the stroke
         if stroke_type == "line":
             gp_stroke.use_cyclic = False 
@@ -232,10 +258,11 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         '''
         if new_stroke:
             # For SWF lines with discontinuities
-            if new_edge is None:
-                return self._new_gp_stroke(gp_data, gp_frame, copy_mat = True, old_stroke = gp_stroke)
+            if new_mat is None:
+                gp_mat = gp_data.materials[gp_stroke.material_index]
+                return self._new_gp_stroke(gp_data, gp_frame, gp_mat, copy_mat = True)
             else:
-                return self._new_gp_stroke(gp_data, gp_frame, first_edge = new_edge)
+                return self._new_gp_stroke(gp_data, gp_frame, new_mat)
 
     def set_material_transforms(self, gp_mat, matrix):
         gp_mat.grease_pencil.mix_factor = 0.0
@@ -264,6 +291,116 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
         gp_mat.grease_pencil.texture_offset[1] = -gp_matrix.decompose()[0][1] - 0.5
         gp_mat.grease_pencil.texture_angle = gp_matrix.decompose()[1].to_euler()[2]
 
+    def pre_process_tags(self, tags):
+        # Pull in re-sharable data (images, materials, sound)
+
+        fill_styles = []
+        line_styles = []
+        sound_head = None
+        mpeg_frames = b""
+
+        for tag in tags:
+            if tag.name == "End":
+                if len(mpeg_frames) > 0: # There is sound
+                    sound_file = open("/tmp/swf_sound.mp3", "wb") #XXX Path should probably be customizable
+                    sound_file.write(mpeg_frames)
+                    sound_file.close()
+                    if not bpy.context.scene.sequence_editor:
+                        bpy.context.scene.sequence_editor_create()
+                    sound_strip = bpy.context.scene.sequence_editor.sequences.new_sound("swf_sound", "/tmp/swf_sound.mp3", 0, 1)
+
+            elif tag.name.startswith("TagSoundStreamHead"):
+                sound_head = tag
+
+            elif tag.name == "TagSoundStreamBlock":
+                if sound_head.soundFormat == 2: # MP3
+                    #XXX Currently only supporting embedded MP3
+                    #XXX Also assumes a single embedded sound
+                    tag.complete_parse_with_header(sound_head)
+                    mpeg_frames += tag.mpegFrames
+
+            if tag.name == "DefineBitsJPEG2":
+                image = Image.open(tag.bitmapData)
+                img_datablock = pil_to_image(image, name = tag.name)
+                img_datablock["swf_characterId"] = tag.characterId
+                self.swf_data[tag.characterId] = {"data": img_datablock, "type": "image"}
+        
+            # Right now this doesn't account for morphing styles... ideally that could be done with a modifier
+            elif tag.name.startswith("DefineShape"):
+                tag.shapes._create_edge_maps()
+                edge_fills = tag.shapes._fillStyles
+                edge_lines = tag.shapes._lineStyles
+
+                # Populate arrays of global fill/line styles
+                for fs in edge_fills:
+                    if fs not in fill_styles:
+                        fill_styles.append(fs)
+                for ls in edge_lines:
+                    if ls not in line_styles:
+                        line_styles.append(ls)
+
+                # Populate global style combos list
+                for edge_map in tag.shapes.line_edge_maps:
+                    for edges in edge_map.values():
+                        for edge in edges:
+                            style_combo = {
+                                "line_style": edge_lines[edge.line_style_idx - 1] if edge.line_style_idx > 0 else None,
+                                "fill_style": edge_fills[edge.fill_style_idx - 1] if edge.fill_style_idx > 0 else None
+                            }
+                            if style_combo not in self.swf_style_map:
+                                self.swf_style_map.append(style_combo)
+                for edge_map in tag.shapes.fill_edge_maps: #XXX Partial copy pasta from above... assumes line edge maps is the same length as fill edge maps
+                    for edges in edge_map.values():
+                        for edge in edges:
+                            style_combo = {
+                                "line_style": edge_lines[edge.line_style_idx - 1] if edge.line_style_idx > 0 else None,
+                                "fill_style": edge_fills[edge.fill_style_idx - 1] if edge.fill_style_idx > 0 else None
+                            }
+                            if style_combo not in self.swf_style_map:
+                                self.swf_style_map.append(style_combo)
+
+        # Now we create our materials
+        for style_combo in self.swf_style_map:
+            mat_name = "SWF Material.000"
+            gp_mat = bpy.data.materials.new(mat_name)
+            bpy.data.materials.create_gpencil_data(gp_mat)
+            # Do the line style first
+            if style_combo["line_style"] is not None:
+                line_style = style_combo["line_style"]
+                gp_mat.grease_pencil.color  = hex_to_rgba(hex(ColorUtils.rgb(line_style.color)))
+                gp_mat["swf_linewidth"] = line_style.width
+                gp_mat["swf_line_miter"] = 3.0
+                gp_mat["swf_no_close"] = line_style.no_close
+                gp_mat.grease_pencil.show_stroke = True
+            else:
+                gp_mat.grease_pencil.show_stroke = False
+            # Now the fill style
+            if style_combo["fill_style"] is not None:
+                fill_style =style_combo["fill_style"]
+                if fill_style.type == 0: # Solid fill
+                    gp_mat.grease_pencil.fill_style = "SOLID"
+                    gp_mat.grease_pencil.fill_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.rgb)))
+                elif fill_style.type in [16, 18, 19]: # Linear or Radial gradient
+                    #XXX Only support for two-color gradients in GP fill style gradients; only using first and last gradient record
+                    gp_mat.grease_pencil.fill_style = "GRADIENT"
+                    if fill_style.type == 16:
+                        gp_mat.grease_pencil.gradient_type = "LINEAR"
+                    elif fill_style.type in [18, 19]:
+                        gp_mat.grease_pencil.gradient_type = "RADIAL"
+                    gp_mat.grease_pencil.fill_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.gradient.records[0].color)))
+                    gp_mat.grease_pencil.mix_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.gradient.records[-1].color)))
+                    self.set_material_transforms(gp_mat, fill_style.gradient_matrix)
+                elif fill_style.type in [64, 65, 66, 67]: # Bitmap fill
+                    gp_mat.grease_pencil.fill_style = "TEXTURE"
+                    image = self.swf_data[fill_style.bitmap_id]["data"]
+                    gp_mat.grease_pencil.fill_image = image
+                    self.set_material_transforms(gp_mat, fill_style.bitmap_matrix)
+                gp_mat.grease_pencil.show_fill = True
+            else:
+                gp_mat.grease_pencil.show_fill = False
+            # Add the material to the style map
+            style_combo["material"] = gp_mat
+
     def parse_tags(self, tags, is_sprite = False):
             # Parsing should basically look like this:
             #  * Iterate through all tags in order.
@@ -280,12 +417,13 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
 
             orig_frame = bpy.context.scene.frame_current
             bpy.context.scene.frame_current = 1
-            sound_head = None
-            mpeg_frames = b""
+            swf_object = None
 
             if is_sprite:
                 # Make container collection for this set of tags
                 tag_collection = bpy.data.collections.new("SWF Sprite Tags")
+                self.swf_collection.children.link(tag_collection)
+                bpy.context.scene.view_layers[0].layer_collection.children[self.swf_collection.name].children[tag_collection.name].exclude = True #XXX Kind of hacky hardcoding of the default view layer
                 sprite_objects = [] # A simple list so we know which objects are part of this sprite
             last_character = None
 
@@ -293,14 +431,6 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
             for i, tag in enumerate(tags):
                 #print(i, tag.name)
                 if tag.name == "End":
-                    bpy.context.scene.frame_current = orig_frame
-                    if len(mpeg_frames) > 0: # There is sound
-                        sound_file = open("/tmp/swf_sound.mp3", "wb") #XXX Path should probably be customizable
-                        sound_file.write(mpeg_frames)
-                        sound_file.close()
-                        if not bpy.context.scene.sequence_editor:
-                            bpy.context.scene.sequence_editor_create()
-                        sound_strip = bpy.context.scene.sequence_editor.sequences.new_sound("swf_sound", "/tmp/swf_sound.mp3", 0, 1)
                     if is_sprite:
                         # Hacky clean-up because I think SWF assumes all sprite animations are loops
                         for ob in sprite_objects:
@@ -320,82 +450,6 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                     tag.shapes._create_edge_maps()
                     line_styles = tag.shapes._lineStyles
                     fill_styles = tag.shapes._fillStyles
-                    # Create materials based on initial fill and line styles
-                    # This is a bit of a challenge because Grease Pencil materials don't separate fill and line styles for a given shape, so we have to parse the fill edge map and the line edge map to know the combinations ahead of time
-                    # Also we have to go through every single edge because SWF supports changing styles midstream on a path. Gross.
-                    style_combos = []
-                    for edge_map in tag.shapes.line_edge_maps:
-                        for edges in edge_map.values():
-                            for edge in edges:
-                                style_combo = {
-                                    "line_style_idx": edge.line_style_idx,
-                                    "fill_style_idx": edge.fill_style_idx
-                                }
-                                if style_combo not in style_combos:
-                                    style_combos.append(style_combo)
-                    for edge_map in tag.shapes.fill_edge_maps: #XXX Partial copy pasta from above... assumes line edge maps is the same length as fill edge maps
-                        for edges in edge_map.values():
-                            for edge in edges:
-                                style_combo = {
-                                    "line_style_idx": edge.line_style_idx,
-                                    "fill_style_idx": edge.fill_style_idx
-                                }
-                                if style_combo not in style_combos:
-                                    style_combos.append(style_combo)
-                    # Now we create those materials
-                    for style_combo in style_combos:
-                        # Using a convention here... "SWF Material_LSI-FSI" where LSI is the line style index and FSI is the fill style index
-                        mat_name = "SWF Material_{0}-{1}".format(style_combo["line_style_idx"], style_combo["fill_style_idx"])
-                        gp_mat = bpy.data.materials.new(mat_name)
-                        bpy.data.materials.create_gpencil_data(gp_mat)
-                        # Do the line style first
-                        if style_combo["line_style_idx"] > 0:
-                            line_style = line_styles[style_combo["line_style_idx"] - 1]
-                            gp_mat.grease_pencil.color  = hex_to_rgba(hex(ColorUtils.rgb(line_style.color)))
-                            gp_mat["swf_linewidth"] = line_style.width
-                            gp_mat["swf_line_miter"] = 3.0
-                            gp_mat["swf_no_close"] = line_style.no_close
-                            gp_mat.grease_pencil.show_stroke = True
-                        else:
-                            gp_mat.grease_pencil.show_stroke = False
-                        gp_mat["swf_line_style_idx"] = style_combo["line_style_idx"]
-                        # Now the fill style
-                        if style_combo["fill_style_idx"] > 0:
-                            fill_style = fill_styles[style_combo["fill_style_idx"] - 1]
-                            if fill_style.type == 0: # Solid fill
-                                gp_mat.grease_pencil.fill_style = "SOLID"
-                                gp_mat.grease_pencil.fill_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.rgb)))
-                            elif fill_style.type in [16, 18, 19]: # Linear or Radial gradient
-                                #XXX Only support for two-color gradients in GP fill style gradients; only using first and last gradient record
-                                gp_mat.grease_pencil.fill_style = "GRADIENT"
-                                if fill_style.type == 16:
-                                    gp_mat.grease_pencil.gradient_type = "LINEAR"
-                                elif fill_style.type in [18, 19]:
-                                    gp_mat.grease_pencil.gradient_type = "RADIAL"
-                                gp_mat.grease_pencil.fill_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.gradient.records[0].color)))
-                                gp_mat.grease_pencil.mix_color = hex_to_rgba(hex(ColorUtils.rgb(fill_style.gradient.records[-1].color)))
-                                self.set_material_transforms(gp_mat, fill_style.gradient_matrix)
-                            elif fill_style.type in [64, 65, 66, 67]: # Bitmap fill
-                                gp_mat.grease_pencil.fill_style = "TEXTURE"
-                                image = self.swf_data[fill_style.bitmap_id]["data"]
-                                gp_mat.grease_pencil.fill_image = image
-                                self.set_material_transforms(gp_mat, fill_style.bitmap_matrix)
-                            gp_mat.grease_pencil.show_fill = True
-                        else:
-                            gp_mat.grease_pencil.show_fill = False
-                        gp_mat["swf_fill_style_idx"] = style_combo["fill_style_idx"]
-                        gp_data.materials.append(gp_mat)
-
-                    # Make a holdout material for holes
-                    gp_mat = bpy.data.materials.new("SWF Holdout")
-                    bpy.data.materials.create_gpencil_data(gp_mat)
-                    gp_mat.grease_pencil.fill_style = "SOLID"
-                    gp_mat.grease_pencil.use_fill_holdout = True
-                    gp_mat.grease_pencil.show_fill = True
-                    gp_mat["swf_line_style_idx"] = 0
-                    gp_mat["swf_fill_style_idx"] = 0
-                    gp_data.materials.append(gp_mat)
-
                     # We need some basic layer stuff in our Grease Pencil object for drawing
                     gp_layer = gp_data.layers.new("Layer", set_active = True)
                     gp_frame = gp_layer.frames.new(bpy.context.scene.frame_current) #XXX This is only the first frame... not all of them
@@ -421,124 +475,111 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
                     # Populate the swf_data dict with our newly imported stuff
                     self.swf_data[tag.characterId] = {"data": sprite_instance, "type": "sprite"}
 
-                if tag.name == "DefineBitsJPEG2":
-                    image = Image.open(tag.bitmapData)
-                    img_datablock = pil_to_image(image, name = tag.name)
-                    img_datablock["swf_characterId"] = tag.characterId
-                    self.swf_data[tag.characterId] = {"data": img_datablock, "type": "image"}
-
                 if tag.name.startswith("PlaceObject"):
                     if tag.hasCharacter:
                         # Add a new character (that we've already defined with ID of characterId)
                         character = self.swf_data[tag.characterId]
                         if character["type"] == "shape":
-                            object = bpy.data.objects.new(tag.name + ".{0:03}".format(tag.characterId), character["data"])
+                            if swf_object is None:
+                                swf_object = bpy.data.objects.new("SWF Object", character["data"].copy())
+                                self.swf_collection.objects.link(swf_object)
+                                #if tag.hasMatrix:
+                                #    self.key_transforms(swf_object, tag.matrix)
+
+                            if len(swf_object.data.layers) == 1 and swf_object.data.layers[0].info == "Layer":
+                                # Rename the layer if this is the first layer
+                                swf_object.data.layers[0].info = str(tag.depth)
+                                layer = swf_object.data.layers[str(tag.depth)]
+                                frame = layer.frames[0]
+                                if tag.hasMatrix:
+                                    layer_matrix = swf_matrix_to_blender_matrix(tag.matrix)
+                                    self._transform_strokes(frame.strokes, layer_matrix, swf_object.matrix_world)
+                                else:
+                                    layer_matrix = swf_object.matrix_world
+                                self.swf_layer_matrices[tag.depth] = layer_matrix
+                            elif str(tag.depth) not in swf_object.data.layers:
+                                layer = swf_object.data.layers.new(str(tag.depth))
+                                character["data"].layers["Layer"].frames[0].frame_number = bpy.context.scene.frame_current
+                                frame = layer.frames.copy(character["data"].layers["Layer"].frames[0])
+                                #XXX Hacky attempt to maintain proper sorting of layers
+                                swf_object.data.layers.active_index -= 1
+                                while int(layer.info) < int(swf_object.data.layers[swf_object.data.layers.active_index].info) and \
+                                    swf_object.data.layers.active_index > 0:
+                                    swf_object.data.layers.move(layer, "DOWN")
+                                    swf_object.data.layers.active_index -= 2
+                                swf_object.data.layers.active_index = len(swf_object.data.layers) - 1
+                                for stroke in frame.strokes:
+                                    stroke_mat = character["data"].materials[stroke.material_index]
+                                    if stroke_mat.name not in swf_object.data.materials:
+                                        swf_object.data.materials.append(stroke_mat)
+                                    # Remap index to match updated material list
+                                    stroke.material_index = {stroke_mat.name: i for i, stroke_mat in enumerate(swf_object.data.materials)}[stroke_mat.name]
+                                if tag.hasMatrix:
+                                    layer_matrix = swf_matrix_to_blender_matrix(tag.matrix)
+                                    self._transform_strokes(frame.strokes, layer_matrix, swf_object.matrix_world)
+                                else:
+                                    layer_matrix = swf_object.matrix_world
+                                self.swf_layer_matrices[tag.depth] = layer_matrix
+
+                            elif str(tag.depth) in swf_object.data.layers:# and tag.hasMove:
+                                # Character at given depth is removed. New character (already defined with ID of characterId) is added at given depth
+                                layer = swf_object.data.layers[str(tag.depth)]
+                                character["data"].layers["Layer"].frames[0].frame_number = bpy.context.scene.frame_current
+                                frame = layer.frames.copy(character["data"].layers["Layer"].frames[0])
+                                for stroke in frame.strokes:
+                                    stroke_mat = character["data"].materials[stroke.material_index]
+                                    if stroke_mat.name not in swf_object.data.materials:
+                                        swf_object.data.materials.append(stroke_mat)
+                                    # Remap index to match updated material list
+                                    stroke.material_index = {stroke_mat.name: i for i, stroke_mat in enumerate(swf_object.data.materials)}[stroke_mat.name]
+                                layer_matrix = self.swf_layer_matrices[tag.depth]
+                                self._transform_strokes(frame.strokes, layer_matrix, swf_object.matrix_world)
                         elif character["type"] == "sprite":
                             object = character["data"]
 
-                        if not is_sprite:
-                            bpy.context.collection.objects.link(object)
-                        else:
-                            tag_collection.objects.link(object)
-
-                        if tag.hasMatrix:
-                            self.key_transforms(object, tag.matrix, depth = tag.depth)
-
-                        object["swf_depth"] = tag.depth
+                        # Little note: when a placed object is a sprite, it has a depth value, but since we're making that a new object in Blender, its zorder may not work well if it falls in the middle of a depth stack unless we adjust Z height of strokes.
                         if is_sprite:
+                            tag_collection.objects.link(object)
+                            object["swf_depth"] = tag.depth
                             object["swf_sprite_member"] = True
                             sprite_objects.append(object)
 
-                        if hasattr(tag, "instanceName") and tag.instanceName is not None:
-                            object.name = tag.instanceName
-
-                        if tag.hasMove:
-                            # Character at given depth is removed. New character (already defined with ID of characterId) is added at given depth
-                            #XXX This digs through all objects to find the one with the right 'swf_depth' custom property value... should be made faster
-                            characters_at_depth = []
-                            for ob in bpy.data.objects:
-                                if "swf_depth" in ob and ob["swf_depth"] == tag.depth and ob.hide_viewport == False:
-                                    characters_at_depth.append(ob)
-                            characters_at_depth.remove(object) # Should always be possible since we just added that object, results in a list with a length of 1
-                            if len(characters_at_depth) == 1:
-                                removed_character = characters_at_depth[0]
-                                removed_character.hide_viewport = True
-                                removed_character.hide_render = True
-                                removed_character.keyframe_insert(data_path = "hide_viewport", frame = bpy.context.scene.frame_current)
-                                removed_character.keyframe_insert(data_path = "hide_render", frame = bpy.context.scene.frame_current)
-                                object.location = removed_character.location
-                                object.rotation_euler = removed_character.rotation_euler
-                                object.scale = removed_character.scale
-                                object.keyframe_insert(data_path = "location")
-                                object.keyframe_insert(data_path = "rotation_euler")
-                                object.keyframe_insert(data_path = "scale")
-                                removed_character = None
-                            else:
-                                raise Exception("Trying to replace a character that was never placed")
-
-                        if bpy.context.scene.frame_current > 1:
-                            # We're adding the object after Frame 1, so hide it before that frame
-                            object.hide_viewport = True
-                            object.hide_render = True
-                            object.keyframe_insert(data_path = "hide_viewport", frame = 1)
-                            object.keyframe_insert(data_path = "hide_render", frame = 1)
-                        object.hide_viewport = False
-                        object.hide_render = False
-                        object.keyframe_insert(data_path = "hide_viewport")
-                        object.keyframe_insert(data_path = "hide_render")
-                        last_character = object
+                            if hasattr(tag, "instanceName") and tag.instanceName is not None:
+                                object.name = tag.instanceName
 
                     elif not tag.hasCharacter and tag.hasMove:
                         # Character at given depth (only one character is allowed at a given depth) has been modified
-                        #XXX Expensive search
-                        character = None
-                        for ob in bpy.data.objects:
-                            if "swf_depth" in ob and ob["swf_depth"] == tag.depth and ob.hide_viewport == False:
-                                if not is_sprite and "swf_sprite_member" not in ob:
-                                    character = ob
-                                    break
-                                elif is_sprite and "swf_sprite_member" in ob and ob["swf_sprite_member"] == True:
-                                    character = ob
-                                    break
-
-                        if character is not None:
-                            if tag.hasMatrix:
-                                self.key_transforms(character, tag.matrix, depth = tag.depth)
-                        else:
-                            raise Exception("Trying to modify an object/character that has not yet been placed")
+                        active_layer = swf_object.data.layers[str(tag.depth)]
+                        new_frame = active_layer.frames.copy(active_layer.frames[-1])
+                        new_frame.frame_number = bpy.context.scene.frame_current
+                        if tag.hasMatrix:
+                            layer_matrix = self.swf_layer_matrices[tag.depth]
+                            self._transform_strokes(new_frame.strokes, swf_object.matrix_world, layer_matrix) 
+                            self._transform_strokes(new_frame.strokes, tag.matrix, swf_object.matrix_world) #XXX Would be nice if I could bake these into a single matrix
+                            self.swf_layer_matrices[tag.depth] = swf_matrix_to_blender_matrix(tag.matrix)
 
                     if tag.hasColorTransform:
-                        #XXX Perhaps not the best approach, the HSV modifier doesn't work on GP image textures
+                        #XXX Perhaps not the best approach, the HSV modifier doesn't work on GP image textures; hopefully resolves better when GP objects can have Eevee materials
                         add_color = rgb_gamma([tag.colorTransform.rAdd, tag.colorTransform.gAdd, tag.colorTransform.bAdd], 2.2)
                         mix_factor = 1.0 - (tag.colorTransform.rMult / 255) #XXX Assumes uniform mixing for R, G, and B
-                        last_character.data.layers[0].tint_color = add_color #XXX Assumes only one GP layer
-                        last_character.data.layers[0].tint_factor = 1.0
-                        for slot in last_character.material_slots:
-                            slot.material.grease_pencil.mix_factor = mix_factor
+                        swf_object.data.layers[str(tag.depth)].tint_color = add_color 
+                        swf_object.data.layers[str(tag.depth)].tint_factor = 1.0
+                        materials = []
+                        for stroke in swf_object.data.layers[str(tag.depth)].frames[-1].strokes:
+                            if stroke.material_index not in materials:
+                                materials.append(stroke.material_index)
+                        for mat in materials:
+                            swf_object.data.materials[mat].grease_pencil.mix_factor = mix_factor
 
                 if tag.name == "RemoveObject2":
-                    #XXX Searches all objects... could be optimized somehow, I'm sure
-                    for ob in bpy.data.objects:
-                        if "swf_depth" in ob and ob["swf_depth"] == tag.depth and ob.hide_viewport == False: # Should only be one object
-                            ob.hide_viewport = True
-                            ob.hide_render = True
-                            ob.keyframe_insert(data_path = "hide_viewport")
-                            ob.keyframe_insert(data_path = "hide_render")
-                            break
-
-                if tag.name.startswith("TagSoundStreamHead"):
-                    sound_head = tag
-
-                if tag.name == "TagSoundStreamBlock":
-                    if sound_head.soundFormat == 2: # MP3
-                        #XXX Currently only supporting embedded MP3
-                        #XXX Also assumes a single embedded sound
-                        tag.complete_parse_with_header(sound_head)
-                        mpeg_frames += tag.mpegFrames
+                    # Insert a blank frame in the given layer at the current frame
+                    swf_object.data.layers[str(tag.depth)].frames.new(bpy.context.scene.frame_current)
                 
                 if tag.name == "ShowFrame":
                     bpy.context.scene.frame_current += 1
                     #break #XXX Only show the first frame for now
+
+            bpy.context.scene.frame_current = orig_frame
 
     def execute(self, context):
         swf = load_swf(self.filepath)
@@ -556,10 +597,10 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
             camera_ob = bpy.data.objects.new("SWF Camera", camera_data)
             if bpy.data.collections.find("Camera") == -1:
                 camera_collection = bpy.data.collections.new("SWF Camera")
-                bpy.context.scene.collection.children.link(camera_collection)
             else:
                 camera_collection = bpy.data.collections[bpy.data.collections.find("Camera")]
                 camera_collection.name = "SWF Camera"
+                bpy.context.scene.collection.children.unlink(camera_collection)
             camera_collection.objects.link(camera_ob)
             bpy.context.scene.camera = camera_ob
             area = next(area for area in bpy.context.screen.areas if area.type == 'VIEW_3D')
@@ -589,6 +630,13 @@ class SWF_OT_import(bpy.types.Operator, ImportHelper):
 
         if self.import_world:
             build_world(swf, width, height)
+
+        # Create a collection to hold any SWF objects
+        self.swf_collection = bpy.data.collections.new("SWF Objects")
+        bpy.context.scene.collection.children.link(self.swf_collection)
+        self.swf_collection.children.link(camera_collection)
+
+        self.pre_process_tags(swf.tags) #XXX This means we're digging through the whole SWF twice, but it should make it easier to parse
 
         self.parse_tags(swf.tags)
 
