@@ -1,6 +1,6 @@
 
 from __future__ import absolute_import
-import six
+from ..six import six
 class Action(object):
     def __init__(self, code, length):
         self._code = code

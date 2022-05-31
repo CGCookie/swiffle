@@ -1,0 +1,3 @@
+[submodule "lib/six"]
+	path = lib/six
+	url = https://github.com/benjaminp/six.git

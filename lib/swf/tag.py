@@ -4,7 +4,7 @@ from .data import *
 from .utils import *
 from .stream import *
 import datetime
-from six.moves import range
+from ..six.six.moves import range
 try:
     import Image
 except ImportError:

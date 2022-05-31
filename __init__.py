@@ -40,67 +40,67 @@ import subprocess
 # Local imports
 from . import global_vars
 global_vars.initialize()
-from .install_dependencies import dependencies, install_pip, install_and_import_module, import_module
+#from .install_dependencies import dependencies, install_pip, install_and_import_module, import_module
 from .import_swf import SWF_OT_import
 
 
 classes = (SWF_OT_import,)
 
 
-class SWF_OT_install_dependencies(bpy.types.Operator):
-    bl_idname = "preferences.swf_install_dependencies"
-    bl_label = "Install dependencies"
-    bl_description = ("Downloads and installs the required python packages for this add-on. "
-                      "Internet connection is required. Blender may have to be started with "
-                      "elevated permissions in order to install the package")
-    bl_options = {"REGISTER", "INTERNAL"}
-
-    @classmethod
-    def poll(self, context):
-        # Deactivate when dependencies have been installed
-        return not global_vars.dependencies_installed
-
-    def execute(self, context):
-        try:
-            install_pip()
-            for dependency in dependencies:
-                install_and_import_module(module_name=dependency.module,
-                                          package_name=dependency.package,
-                                          global_name=dependency.name)
-        except (subprocess.CalledProcessError, ImportError) as err:
-            self.report({"ERROR"}, str(err))
-            return {"CANCELLED"}
-
-        global_vars.dependencies_installed = True
-
-        # Register the panels, operators, etc. since dependencies are installed
-        for cls in classes:
-            bpy.utils.register_class(cls)
-
-        return {"FINISHED"}
+#class SWF_OT_install_dependencies(bpy.types.Operator):
+#    bl_idname = "preferences.swf_install_dependencies"
+#    bl_label = "Install dependencies"
+#    bl_description = ("Downloads and installs the required python packages for this add-on. "
+#                      "Internet connection is required. Blender may have to be started with "
+#                      "elevated permissions in order to install the package")
+#    bl_options = {"REGISTER", "INTERNAL"}
+#
+#    @classmethod
+#    def poll(self, context):
+#        # Deactivate when dependencies have been installed
+#        return not global_vars.dependencies_installed
+#
+#    def execute(self, context):
+#        try:
+#            install_pip()
+#            for dependency in dependencies:
+#                install_and_import_module(module_name=dependency.module,
+#                                          package_name=dependency.package,
+#                                          global_name=dependency.name)
+#        except (subprocess.CalledProcessError, ImportError) as err:
+#            self.report({"ERROR"}, str(err))
+#            return {"CANCELLED"}
+#
+#        global_vars.dependencies_installed = True
+#
+#        # Register the panels, operators, etc. since dependencies are installed
+#        for cls in classes:
+#            bpy.utils.register_class(cls)
+#
+#        return {"FINISHED"}
 
 
 class preferences(bpy.types.AddonPreferences):
     bl_idname = __name__
 
     def draw(self, context):
-        layout = self.layout
+        pass
+        #layout = self.layout
 
-        lines = [f"This add-on requires a couple Python packages to be installed:",
-                 f"  - pillow",
-                 f"  - six",
-                 f"  - lxml",
-                 f"  - pylzma",
-                 f"Click the Install Dependencies button below to install them."]
+        #lines = [f"This add-on requires a couple Python packages to be installed:",
+        #         f"  - pillow",
+        #         f"  - six",
+        #         f"  - lxml",
+        #         f"  - pylzma",
+        #         f"Click the Install Dependencies button below to install them."]
 
-        for line in lines:
-            layout.label(text=line)
+        #for line in lines:
+        #    layout.label(text=line)
 
-        layout.operator(SWF_OT_install_dependencies.bl_idname, icon="CONSOLE")
+        #layout.operator(SWF_OT_install_dependencies.bl_idname, icon="CONSOLE")
 
 
-preference_classes = (SWF_OT_install_dependencies,
-                      preferences)
+#preference_classes = (preferences)
 
 
 def add_to_import_menu(self, context):
@@ -109,16 +109,16 @@ def add_to_import_menu(self, context):
 
 def register():
 
-    for cls in preference_classes:
-        bpy.utils.register_class(cls)
+    #for cls in preference_classes:
+    #    bpy.utils.register_class(cls)
 
-    try:
-        for dependency in dependencies:
-            import_module(module_name=dependency.module, global_name=dependency.name)
-        global_vars.dependencies_installed = True
-    except ModuleNotFoundError:
-        # Don't register other panels, operators etc.
-        return
+    #try:
+    #    for dependency in dependencies:
+    #        import_module(module_name=dependency.module, global_name=dependency.name)
+    #    global_vars.dependencies_installed = True
+    #except ModuleNotFoundError:
+    #    # Don't register other panels, operators etc.
+    #    return
 
     for cls in classes:
         bpy.utils.register_class(cls)

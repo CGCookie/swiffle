@@ -11,14 +11,14 @@ from .filters import *
 from lxml import objectify
 from lxml import etree
 import base64
-from six.moves import map
-from six.moves import range
+from ..six.six.moves import map
+from ..six.six.moves import range
 try:
     import Image
 except ImportError:
     from PIL import Image
 from io import BytesIO
-from six.moves import cStringIO
+from ..six.six.moves import cStringIO
 import math
 import re
 import copy

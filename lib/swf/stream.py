@@ -3,7 +3,7 @@ import struct, math
 from .data import *
 from .actions import *
 from .filters import SWFFilterFactory
-from six.moves import range
+from ..six.six.moves import range
 from functools import reduce
 
 class SWFStream(object):
