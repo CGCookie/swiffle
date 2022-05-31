@@ -33,7 +33,6 @@ Dependency = namedtuple("Dependency", ["module", "package", "name"])
 # "import" statement.
 dependencies = (
     Dependency(module="PIL", package="pillow", name="pillow"),
-    Dependency(module="six", package=None, name=None),
     Dependency(module="lxml", package=None, name=None),
     Dependency(module="pylzma", package=None, name=None)
 )
