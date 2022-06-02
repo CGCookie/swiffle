@@ -216,21 +216,34 @@ class SWFShape(_dumb_repr):
 
         self._edgeMapsCreated = True
 
+    def _determine_path_winding(self, sub_path):
+        return 'CCW' if sum(
+            (edge0.start[0] - edge1.start[0]) * (edge0.start[1] + edge1.start[1])
+            for edge0, edge1 in zip(sub_path, sub_path[1:] + sub_path[:1])
+        ) < 0 else 'CW'
+
     def _process_sub_path(self, sub_path, linestyle_idx, fillstyle_idx0, fillstyle_idx1, record_id=-1):
         path = None
-        if fillstyle_idx0 != 0:
-            if not fillstyle_idx0 in self.current_fill_edge_map:
-                path = self.current_fill_edge_map[fillstyle_idx0] = []
-            else:
-                path = self.current_fill_edge_map[fillstyle_idx0]
-            for j in range(len(sub_path) - 1, -1, -1):
-                path.append(sub_path[j].reverse_with_new_fillstyle(fillstyle_idx0))
+        fillstyle_index_use = None
 
-        if fillstyle_idx1 != 0:
-            if not fillstyle_idx1 in self.current_fill_edge_map:
-                path = self.current_fill_edge_map[fillstyle_idx1] = []
+        if (fillstyle_idx0 != 0 or fillstyle_idx1 != 0) and len(sub_path) > 1:
+            # Reasonably sure this is a fill 
+            winding = self._determine_path_winding(sub_path)
+            if winding == "CCW": # Counter-clockwise geometry, use fill style 0
+                fillstyle_index_use = fillstyle_idx0
+            else: # Clockwise geometry, use fill style 1
+                fillstyle_index_use = fillstyle_idx1
+
+            if not fillstyle_index_use in self.current_fill_edge_map:
+                path = self.current_fill_edge_map[fillstyle_index_use] = []
             else:
-                path = self.current_fill_edge_map[fillstyle_idx1]
+                path = self.current_fill_edge_map[fillstyle_index_use]
+
+            if fillstyle_index_use is fillstyle_idx0:
+                # Reusing orginal PYSWF code here... still not entirely sure why it reverses direction for fs0
+                for j in range(len(sub_path) - 1, -1, -1):
+                    path.append(sub_path[j].reverse_with_new_fillstyle(fillstyle_idx0))
+
             self._append_to(path, sub_path)
 
         if linestyle_idx != 0:
